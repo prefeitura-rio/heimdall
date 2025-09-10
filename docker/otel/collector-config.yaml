@@ -1,0 +1,60 @@
+# OpenTelemetry Collector configuration for Heimdall development
+# Receives traces from Heimdall services and exports to Jaeger
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  memory_limiter:
+    limit_mib: 512
+
+  resource:
+    attributes:
+      - key: environment
+        value: development
+        action: insert
+
+exporters:
+  # Export to Jaeger for visualization
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+
+  # Export to console for debugging
+  logging:
+    loglevel: info
+
+  # Prometheus metrics export
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [jaeger, logging]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, logging]
+
+  extensions: []

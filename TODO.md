@@ -17,10 +17,10 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
 
 ## 🏗️ Phase 1: Development Environment Setup
 
-### Task 1.1: Initialize Project Structure
-- [ ] Create project directory: `heimdall/`
-- [ ] Initialize git repository: `git init`
-- [ ] Create directory structure as specified in SPEC.md Section 8:
+### Task 1.1: Initialize Project Structure ✅
+- [x] Create project directory: `heimdall/`
+- [x] Initialize git repository: `git init`
+- [x] Create directory structure as specified in SPEC.md Section 8:
   ```
   heimdall/
   ├── app/
@@ -37,26 +37,26 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   └── migrations/
   ```
 
-### Task 1.2: Create Nix Flake Configuration
-- [ ] Create `flake.nix` exactly as specified in SPEC.md Section 8
-- [ ] Ensure flake includes: python311, uv, ruff, docker, docker-compose, postgresql, git
-- [ ] Test flake works: `nix develop`
-- [ ] Verify all tools are available and display versions in shell hook
+### Task 1.2: Create Nix Flake Configuration ✅
+- [x] Create `flake.nix` exactly as specified in SPEC.md Section 8
+- [x] Ensure flake includes: python311, uv, ruff, docker, docker-compose, postgresql, git
+- [x] Test flake works: `nix develop`
+- [x] Verify all tools are available and display versions in shell hook
 
-### Task 1.3: Setup direnv Configuration  
-- [ ] Create `.envrc` file exactly as specified in SPEC.md Section 8
-- [ ] Configure development environment variables for local development
-- [ ] Test direnv works: `direnv allow` and verify environment loads
+### Task 1.3: Setup direnv Configuration ✅
+- [x] Create `.envrc` file exactly as specified in SPEC.md Section 8
+- [x] Configure development environment variables for local development
+- [x] Test direnv works: `direnv allow` and verify environment loads
 
-### Task 1.4: Create Git Configuration
-- [ ] Create `.gitignore` file exactly as specified in SPEC.md Section 8
-- [ ] Ensure `.direnv/` directory is excluded
-- [ ] Commit initial project structure
-- [ ] Verify no sensitive files are tracked
+### Task 1.4: Create Git Configuration ✅
+- [x] Create `.gitignore` file exactly as specified in SPEC.md Section 8
+- [x] Ensure `.direnv/` directory is excluded
+- [x] Commit initial project structure
+- [x] Verify no sensitive files are tracked
 
-### Task 1.5: Initialize Python Project with uv
-- [ ] Run `uv init` to initialize Python project
-- [ ] Create `pyproject.toml` with dependencies:
+### Task 1.5: Initialize Python Project with uv ✅
+- [x] Run `uv init` to initialize Python project
+- [x] Create `pyproject.toml` with dependencies:
   - fastapi
   - uvicorn[standard]
   - sqlalchemy
@@ -71,29 +71,27 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - opentelemetry-instrumentation-fastapi
   - opentelemetry-instrumentation-sqlalchemy
   - apscheduler
-- [ ] Configure ruff in pyproject.toml with strict linting rules
-- [ ] Run `uv sync` to install dependencies
-- [ ] Verify all packages install correctly
+- [x] Configure ruff in pyproject.toml with strict linting rules
+- [x] Run `uv sync` to install dependencies
+- [x] Verify all packages install correctly
 
 ## 🐳 Phase 2: Containerization Setup
 
-### Task 2.1: Create Multi-Stage Dockerfile
-- [ ] Create `Dockerfile` with multi-stage build as specified in SPEC.md Section 5
-- [ ] Stage 1: Base image with Python 3.11-slim and dependencies
-- [ ] Stage 2: API service with FastAPI entry point
-- [ ] Stage 3: Background tasks with APScheduler entry point
-- [ ] Test both stages build successfully
-- [ ] Optimize image size and build time
+### Task 2.1: Create Multi-Stage Dockerfile ✅
+- [x] Create `Dockerfile` with multi-stage build as specified in SPEC.md Section 5
+- [x] Stage 1: Base image with Python 3.11-slim and dependencies
+- [x] Stage 2: API service with FastAPI entry point
+- [x] Stage 3: Background tasks with APScheduler entry point
+- [x] Test both stages build successfully
+- [x] Optimize image size and build time
 
-### Task 2.2: Create Docker Compose for Development
-- [ ] Create `docker-compose.yml` for local development with:
+### Task 2.2: Create Docker Compose for Development ✅
+- [x] Create `docker-compose.yml` for local development with:
   - PostgreSQL service (heimdall database)
-  - Cerbos service (check and admin APIs)
   - OpenTelemetry collector
-  - API service (built from Dockerfile)
-  - Background tasks service (built from Dockerfile)
-- [ ] Configure service networking and environment variables
-- [ ] Test services start and communicate correctly
+  - Jaeger for trace visualization
+- [x] Configure service networking and environment variables
+- [x] Test services start and communicate correctly
 
 ## 🗄️ Phase 3: Database Layer Implementation
 

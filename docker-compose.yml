@@ -1,0 +1,60 @@
+# Docker Compose for Heimdall Admin Service Local Development
+# Focuses on essential services needed for development
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: heimdall_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d heimdall_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - heimdall-network
+
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.100.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics
+    volumes:
+      - ./docker/otel/collector-config.yaml:/etc/otel-collector-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - heimdall-network
+
+  # Jaeger for trace visualization
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector HTTP
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+    networks:
+      - heimdall-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  heimdall-network:
+    driver: bridge
