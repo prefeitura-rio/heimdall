@@ -17,6 +17,7 @@
             python311
             uv
             ruff
+            just
             docker
             docker-compose
             postgresql
@@ -28,6 +29,7 @@
             echo "Python: $(python --version)"
             echo "uv: $(uv --version)"
             echo "ruff: $(ruff --version)"
+            echo "just: $(just --version)"
           '';
         };
       });
