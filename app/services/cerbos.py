@@ -246,39 +246,39 @@ class CerbosService(BaseService):
         )
 
     def can_create_mapping(
-        self, caller_subject: str, caller_roles: list[str], owner_group: str
+        self, caller_subject: str, caller_roles: list[str], action_name: str
     ) -> bool:
-        """Check if caller can create mappings for a group."""
+        """Check if caller can create mappings."""
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
             action="mapping:create",
-            resource_type="group",
-            resource_attrs={"name": owner_group},
+            resource_type="mapping",
+            resource_attrs={"action": action_name},
         )
 
     def can_update_mapping(
-        self, caller_subject: str, caller_roles: list[str], owner_group: str
+        self, caller_subject: str, caller_roles: list[str], mapping_id: int
     ) -> bool:
-        """Check if caller can update mappings for a group."""
+        """Check if caller can update mappings."""
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
             action="mapping:update",
-            resource_type="group",
-            resource_attrs={"name": owner_group},
+            resource_type="mapping",
+            resource_attrs={"id": str(mapping_id)},
         )
 
     def can_delete_mapping(
-        self, caller_subject: str, caller_roles: list[str], owner_group: str
+        self, caller_subject: str, caller_roles: list[str], mapping_id: int
     ) -> bool:
-        """Check if caller can delete mappings for a group."""
+        """Check if caller can delete mappings."""
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
             action="mapping:delete",
-            resource_type="group",
-            resource_attrs={"name": owner_group},
+            resource_type="mapping",
+            resource_attrs={"id": str(mapping_id)},
         )
 
     # Transparent Policy Management Methods
