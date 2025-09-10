@@ -35,17 +35,22 @@ class AuditService(BaseService):
         Log an admin operation to the audit table.
         Implements audit logging as specified in SPEC.md.
         """
-        with self.trace_operation("log_operation", {
-            "audit.actor_subject": actor_subject,
-            "audit.operation": operation,
-            "audit.target_type": target_type,
-            "audit.target_id": target_id,
-            "audit.success": success
-        }) as span:
+        with self.trace_operation(
+            "log_operation",
+            {
+                "audit.actor_subject": actor_subject,
+                "audit.operation": operation,
+                "audit.target_type": target_type,
+                "audit.target_id": target_id,
+                "audit.success": success,
+            },
+        ) as span:
             try:
                 # Get actor user ID if not provided
                 if not actor_user_id and actor_subject:
-                    actor_user = db.query(User).filter(User.subject == actor_subject).first()
+                    actor_user = (
+                        db.query(User).filter(User.subject == actor_subject).first()
+                    )
                     actor_user_id = actor_user.id if actor_user else None
 
                 # Create audit entry
@@ -58,7 +63,7 @@ class AuditService(BaseService):
                     request_payload=request_payload,
                     result=result,
                     success=success,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.utcnow(),
                 )
 
                 db.add(audit_entry)
@@ -313,14 +318,17 @@ class AuditService(BaseService):
         Retrieve audit entries with filtering.
         For audit trail review and compliance.
         """
-        with self.trace_operation("get_audit_entries", {
-            "audit.actor_subject": actor_subject,
-            "audit.operation": operation,
-            "audit.target_type": target_type,
-            "audit.success": success,
-            "audit.limit": limit,
-            "audit.offset": offset
-        }) as span:
+        with self.trace_operation(
+            "get_audit_entries",
+            {
+                "audit.actor_subject": actor_subject,
+                "audit.operation": operation,
+                "audit.target_type": target_type,
+                "audit.success": success,
+                "audit.limit": limit,
+                "audit.offset": offset,
+            },
+        ) as span:
             try:
                 query = db.query(AdminAudit)
 
@@ -349,7 +357,9 @@ class AuditService(BaseService):
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 raise
 
-    def _sanitize_request_payload(self, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    def _sanitize_request_payload(
+        self, payload: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
         """
         Sanitize request payload to remove sensitive information.
         Never log passwords, tokens, or other sensitive data.
@@ -369,7 +379,10 @@ class AuditService(BaseService):
                 elif isinstance(v, dict):
                     result[k] = _sanitize_dict(v)
                 elif isinstance(v, list):
-                    result[k] = [_sanitize_dict(item) if isinstance(item, dict) else item for item in v]
+                    result[k] = [
+                        _sanitize_dict(item) if isinstance(item, dict) else item
+                        for item in v
+                    ]
                 else:
                     result[k] = v
             return result

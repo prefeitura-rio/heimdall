@@ -25,23 +25,32 @@ class MappingService(BaseService):
         self.cache_service = CacheService()
         self.audit_service = AuditService()
 
-    def resolve_mapping(self, db: Session, path: str, method: str) -> dict[str, Any] | None:
+    def resolve_mapping(
+        self, db: Session, path: str, method: str
+    ) -> dict[str, Any] | None:
         """
         Resolve path and method to action using regex pattern matching with Redis caching.
         Returns mapping information for adapter usage.
         """
-        with self.trace_operation("resolve_mapping", {
-            "mapping.path": path,
-            "mapping.method": method,
-            "mapping.operation": "resolve"
-        }) as span:
+        with self.trace_operation(
+            "resolve_mapping",
+            {
+                "mapping.path": path,
+                "mapping.method": method,
+                "mapping.operation": "resolve",
+            },
+        ) as span:
             try:
                 # Try to get from cache first
                 cached_result = self.cache_service.get_mapping_cache(path, method)
                 if cached_result:
                     span.set_attribute("mapping.cache_hit", True)
-                    span.set_attribute("mapping.matched_action", cached_result.get("action"))
-                    span.set_attribute("mapping.mapping_id", cached_result.get("mapping_id"))
+                    span.set_attribute(
+                        "mapping.matched_action", cached_result.get("action")
+                    )
+                    span.set_attribute(
+                        "mapping.mapping_id", cached_result.get("mapping_id")
+                    )
                     return cached_result
 
                 span.set_attribute("mapping.cache_hit", False)
@@ -63,8 +72,12 @@ class MappingService(BaseService):
                         pattern = self._convert_pattern_to_regex(endpoint.path_pattern)
 
                         if re.match(pattern, path):
-                            span.set_attribute("mapping.matched_pattern", endpoint.path_pattern)
-                            span.set_attribute("mapping.matched_action", endpoint.action.name)
+                            span.set_attribute(
+                                "mapping.matched_pattern", endpoint.path_pattern
+                            )
+                            span.set_attribute(
+                                "mapping.matched_action", endpoint.action.name
+                            )
                             span.set_attribute("mapping.mapping_id", endpoint.id)
 
                             result = {
@@ -72,7 +85,7 @@ class MappingService(BaseService):
                                 "action": endpoint.action.name,
                                 "path_pattern": endpoint.path_pattern,
                                 "method": endpoint.method,
-                                "description": endpoint.description
+                                "description": endpoint.description,
                             }
 
                             # Cache the result
@@ -101,19 +114,22 @@ class MappingService(BaseService):
         method: str,
         action_name: str,
         description: str | None,
-        created_by: User
+        created_by: User,
     ) -> Endpoint:
         """
         Create a new endpoint mapping.
         Implements mapping creation with validation and permission checking.
         """
-        with self.trace_operation("create_mapping", {
-            "mapping.path_pattern": path_pattern,
-            "mapping.method": method,
-            "mapping.action": action_name,
-            "mapping.created_by": created_by.subject,
-            "mapping.operation": "create"
-        }) as span:
+        with self.trace_operation(
+            "create_mapping",
+            {
+                "mapping.path_pattern": path_pattern,
+                "mapping.method": method,
+                "mapping.action": action_name,
+                "mapping.created_by": created_by.subject,
+                "mapping.operation": "create",
+            },
+        ) as span:
             try:
                 # Validate the regex pattern
                 try:
@@ -126,20 +142,27 @@ class MappingService(BaseService):
                 # Find or create the action
                 action = db.query(Action).filter(Action.name == action_name).first()
                 if not action:
-                    action = Action(name=action_name, description=f"Action for {action_name}")
+                    action = Action(
+                        name=action_name, description=f"Action for {action_name}"
+                    )
                     db.add(action)
                     db.flush()  # Get the ID
                     span.set_attribute("mapping.action_created", True)
 
                 # Check if mapping already exists
-                existing = db.query(Endpoint).filter(
-                    Endpoint.path_pattern == path_pattern,
-                    Endpoint.method == method
-                ).first()
+                existing = (
+                    db.query(Endpoint)
+                    .filter(
+                        Endpoint.path_pattern == path_pattern, Endpoint.method == method
+                    )
+                    .first()
+                )
 
                 if existing:
                     span.set_attribute("mapping.already_exists", True)
-                    raise ValueError(f"Mapping for pattern '{path_pattern}' and method '{method}' already exists")
+                    raise ValueError(
+                        f"Mapping for pattern '{path_pattern}' and method '{method}' already exists"
+                    )
 
                 # Create the endpoint mapping
                 endpoint = Endpoint(
@@ -147,7 +170,7 @@ class MappingService(BaseService):
                     method=method,
                     action_id=action.id,
                     description=description,
-                    created_by=created_by.id
+                    created_by=created_by.id,
                 )
 
                 db.add(endpoint)
@@ -172,12 +195,14 @@ class MappingService(BaseService):
                         "path_pattern": path_pattern,
                         "method": method,
                         "action_name": action_name,
-                        "description": description
+                        "description": description,
                     },
                     result={
                         "mapping_id": endpoint.id,
                         "action_id": action.id,
-                        "action_created": span.attributes.get("mapping.action_created", False)
+                        "action_created": span.attributes.get(
+                            "mapping.action_created", False
+                        ),
                     },
                     success=True,
                     actor_user_id=created_by.id,
@@ -202,7 +227,7 @@ class MappingService(BaseService):
                         "path_pattern": path_pattern,
                         "method": method,
                         "action_name": action_name,
-                        "description": description
+                        "description": description,
                     },
                     result={"error": str(e)},
                     success=False,
@@ -218,16 +243,19 @@ class MappingService(BaseService):
         method: str | None,
         action_name: str | None,
         description: str | None,
-        updated_by: User
+        updated_by: User,
     ) -> Endpoint:
         """
         Update an existing endpoint mapping.
         """
-        with self.trace_operation("update_mapping", {
-            "mapping.id": mapping_id,
-            "mapping.updated_by": updated_by.subject,
-            "mapping.operation": "update"
-        }) as span:
+        with self.trace_operation(
+            "update_mapping",
+            {
+                "mapping.id": mapping_id,
+                "mapping.updated_by": updated_by.subject,
+                "mapping.operation": "update",
+            },
+        ) as span:
             try:
                 # Find the mapping
                 endpoint = db.query(Endpoint).filter(Endpoint.id == mapping_id).first()
@@ -257,7 +285,9 @@ class MappingService(BaseService):
                     # Find or create the action
                     action = db.query(Action).filter(Action.name == action_name).first()
                     if not action:
-                        action = Action(name=action_name, description=f"Action for {action_name}")
+                        action = Action(
+                            name=action_name, description=f"Action for {action_name}"
+                        )
                         db.add(action)
                         db.flush()
                     endpoint.action_id = action.id
@@ -288,7 +318,7 @@ class MappingService(BaseService):
                             "path_pattern": path_pattern,
                             "method": method,
                             "action_name": action_name,
-                            "description": description
+                            "description": description,
                         },
                         result={
                             "mapping_updated": True,
@@ -296,8 +326,8 @@ class MappingService(BaseService):
                                 "path_pattern": path_pattern is not None,
                                 "method": method is not None,
                                 "action_name": action_name is not None,
-                                "description": description is not None
-                            }
+                                "description": description is not None,
+                            },
                         },
                         success=True,
                         actor_user_id=updated_by.id,
@@ -325,7 +355,7 @@ class MappingService(BaseService):
                         "path_pattern": path_pattern,
                         "method": method,
                         "action_name": action_name,
-                        "description": description
+                        "description": description,
                     },
                     result={"error": str(e)},
                     success=False,
@@ -337,11 +367,14 @@ class MappingService(BaseService):
         """
         Delete an endpoint mapping.
         """
-        with self.trace_operation("delete_mapping", {
-            "mapping.id": mapping_id,
-            "mapping.deleted_by": deleted_by.subject,
-            "mapping.operation": "delete"
-        }) as span:
+        with self.trace_operation(
+            "delete_mapping",
+            {
+                "mapping.id": mapping_id,
+                "mapping.deleted_by": deleted_by.subject,
+                "mapping.operation": "delete",
+            },
+        ) as span:
             try:
                 # Find the mapping
                 endpoint = db.query(Endpoint).filter(Endpoint.id == mapping_id).first()
@@ -367,7 +400,7 @@ class MappingService(BaseService):
                     result={
                         "mapping_deleted": True,
                         "path_pattern": endpoint.path_pattern,
-                        "method": endpoint.method
+                        "method": endpoint.method,
                     },
                     success=True,
                     actor_user_id=deleted_by.id,
@@ -396,14 +429,16 @@ class MappingService(BaseService):
                 )
                 raise
 
-    def list_mappings(self, db: Session, action_filter: str | None = None) -> list[Endpoint]:
+    def list_mappings(
+        self, db: Session, action_filter: str | None = None
+    ) -> list[Endpoint]:
         """
         List all endpoint mappings with optional filtering.
         """
-        with self.trace_operation("list_mappings", {
-            "mapping.operation": "list",
-            "mapping.action_filter": action_filter
-        }) as span:
+        with self.trace_operation(
+            "list_mappings",
+            {"mapping.operation": "list", "mapping.action_filter": action_filter},
+        ) as span:
             try:
                 query = db.query(Endpoint).join(Action)
 
@@ -434,18 +469,18 @@ class MappingService(BaseService):
         pattern = re.escape(path_pattern)
 
         # Handle path parameters like :id -> [^/]+
-        pattern = re.sub(r'\\:([a-zA-Z_][a-zA-Z0-9_]*)', r'(?P<\1>[^/]+)', pattern)
+        pattern = re.sub(r"\\:([a-zA-Z_][a-zA-Z0-9_]*)", r"(?P<\1>[^/]+)", pattern)
 
         # Handle ** for multiple path segments
-        pattern = pattern.replace(r'\*\*', '.*')
+        pattern = pattern.replace(r"\*\*", ".*")
 
         # Handle * for single path segment
-        pattern = pattern.replace(r'\*', '[^/]*')
+        pattern = pattern.replace(r"\*", "[^/]*")
 
         # Ensure exact match
-        if not pattern.startswith('^'):
-            pattern = '^' + pattern
-        if not pattern.endswith('$'):
-            pattern = pattern + '$'
+        if not pattern.startswith("^"):
+            pattern = "^" + pattern
+        if not pattern.endswith("$"):
+            pattern = pattern + "$"
 
         return pattern

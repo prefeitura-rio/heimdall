@@ -39,11 +39,13 @@ class StructuredFormatter(logging.Formatter):
 
         # Add trace context if available
         if span_context.is_valid:
-            log_entry.update({
-                "trace_id": format(span_context.trace_id, "032x"),
-                "span_id": format(span_context.span_id, "016x"),
-                "trace_flags": span_context.trace_flags,
-            })
+            log_entry.update(
+                {
+                    "trace_id": format(span_context.trace_id, "032x"),
+                    "span_id": format(span_context.span_id, "016x"),
+                    "trace_flags": span_context.trace_flags,
+                }
+            )
 
         # Add extra fields from record
         if hasattr(record, "extra_fields"):
@@ -257,7 +259,9 @@ def setup_structured_logging() -> None:
     # Set specific logger levels
     logging.getLogger("app").setLevel(logging.INFO)
     logging.getLogger("uvicorn").setLevel(logging.INFO)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)  # Reduce SQL query noise
+    logging.getLogger("sqlalchemy.engine").setLevel(
+        logging.WARNING
+    )  # Reduce SQL query noise
 
     # Silence health check logs in production
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

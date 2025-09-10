@@ -12,18 +12,54 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
 
+from app.config import validate_environment
 from app.database import engine, get_db
 from app.dependencies import get_current_user_with_roles
 from app.logging_config import get_structured_logger, setup_structured_logging
 from app.routers import groups, health, mappings, memberships, roles, users
+from app.services.database_monitor import setup_database_monitoring
 from app.tracing import instrument_fastapi, instrument_sqlalchemy, setup_tracing
 
-# Initialize OpenTelemetry tracing before creating the FastAPI app
-setup_tracing()
+# Initialize OpenTelemetry tracing before creating the FastAPI app (optional)
+tracing_enabled = setup_tracing()
 
 # Configure structured logging
 setup_structured_logging()
 logger = get_structured_logger(__name__)
+
+# Log tracing status
+if tracing_enabled:
+    logger.log_operation(
+        level=20,  # INFO
+        message="OpenTelemetry tracing enabled",
+        operation="tracing_setup",
+        extra_fields={"tracing_enabled": True},
+    )
+else:
+    logger.log_operation(
+        level=20,  # INFO
+        message="OpenTelemetry tracing disabled - OTEL_EXPORTER_OTLP_ENDPOINT not set",
+        operation="tracing_setup",
+        extra_fields={"tracing_enabled": False},
+    )
+
+# Validate environment configuration on startup
+
+try:
+    validate_environment()
+    logger.log_operation(
+        level=20,  # INFO
+        message="Environment configuration validation successful",
+        operation="startup_validation",
+    )
+except Exception as e:
+    logger.log_operation(
+        level=50,  # ERROR
+        message=f"Environment configuration validation failed: {e}",
+        operation="startup_validation",
+        extra_fields={"error": str(e)},
+    )
+    raise
 
 # Create FastAPI application
 app = FastAPI(
@@ -42,6 +78,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Add request/response logging middleware
 @app.middleware("http")
@@ -76,11 +113,15 @@ async def logging_middleware(request: Request, call_next) -> Response:
 
     return response
 
+
 # Instrument FastAPI for automatic HTTP tracing
 instrument_fastapi(app)
 
 # Instrument SQLAlchemy for automatic database tracing
 instrument_sqlalchemy(engine)
+
+# Setup database performance monitoring
+setup_database_monitoring(engine)
 
 
 # Global exception handlers
@@ -103,13 +144,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 "detail": exc.detail,
                 "method": request.method,
                 "url": str(request.url),
-                "exception_type": "HTTPException"
-            }
+                "exception_type": "HTTPException",
+            },
         )
 
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": exc.detail, "status_code": exc.status_code}
+            content={"error": exc.detail, "status_code": exc.status_code},
         )
 
 
@@ -131,13 +172,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 "validation_errors": exc.errors(),
                 "method": request.method,
                 "url": str(request.url),
-                "exception_type": "RequestValidationError"
-            }
+                "exception_type": "RequestValidationError",
+            },
         )
 
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"error": "Validation error", "details": exc.errors()}
+            content={"error": "Validation error", "details": exc.errors()},
         )
 
 
@@ -162,13 +203,13 @@ async def general_exception_handler(request: Request, exc: Exception):
                 "exception_message": str(exc),
                 "method": request.method,
                 "url": str(request.url),
-                "has_traceback": True
-            }
+                "has_traceback": True,
+            },
         )
 
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "Internal server error", "status_code": 500}
+            content={"error": "Internal server error", "status_code": 500},
         )
 
 
@@ -180,7 +221,7 @@ async def health_check():
 
 
 @app.get("/readyz")
-async def readiness_check(db = Depends(get_db)):
+async def readiness_check(db=Depends(get_db)):
     """Readiness check with database connectivity test."""
     tracer = trace.get_tracer(__name__)
     with tracer.start_span("readiness_check") as span:
@@ -193,7 +234,7 @@ async def readiness_check(db = Depends(get_db)):
                 "status": "ready",
                 "service": "heimdall-admin-service",
                 "database": "connected",
-                "version": "1.0.0"
+                "version": "1.0.0",
             }
         except Exception as e:
             span.record_exception(e)
@@ -202,7 +243,7 @@ async def readiness_check(db = Depends(get_db)):
             logger.error("Database connection failed in readiness check", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Database connection failed"
+                detail="Database connection failed",
             )
 
 
@@ -212,7 +253,7 @@ async def version_info():
     return {
         "service": "heimdall-admin-service",
         "version": "1.0.0",
-        "description": "Admin service for group and role management with Cerbos integration"
+        "description": "Admin service for group and role management with Cerbos integration",
     }
 
 

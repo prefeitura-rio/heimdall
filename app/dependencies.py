@@ -53,7 +53,7 @@ def get_current_user(
             message="Authentication failed - invalid credentials",
             event_type="jwt_auth_failed",
             success=False,
-            error="Invalid authentication credentials"
+            error="Invalid authentication credentials",
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -67,7 +67,7 @@ def get_current_user(
             message="Authentication failed - static token not allowed",
             event_type="jwt_required",
             success=False,
-            error="JWT token required for this endpoint"
+            error="JWT token required for this endpoint",
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -82,7 +82,7 @@ def get_current_user(
             message="JWT authentication successful",
             event_type="jwt_auth_success",
             actor_subject=user.subject,
-            success=True
+            success=True,
         )
         return user
     except Exception as e:
@@ -91,7 +91,7 @@ def get_current_user(
             event_type="user_creation_failed",
             actor_subject=auth_result.get("subject", "unknown"),
             success=False,
-            error=str(e)
+            error=str(e),
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -120,7 +120,7 @@ def get_api_user(
             message="API authentication failed - invalid credentials",
             event_type="api_auth_failed",
             success=False,
-            error="Invalid authentication credentials"
+            error="Invalid authentication credentials",
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -134,7 +134,7 @@ def get_api_user(
             message="Static API token authentication successful",
             event_type="static_api_auth_success",
             actor_subject="system:api_client",
-            success=True
+            success=True,
         )
         return {
             "type": "static_api",
@@ -152,7 +152,7 @@ def get_api_user(
             message="JWT API authentication successful",
             event_type="jwt_api_auth_success",
             actor_subject=user.subject,
-            success=True
+            success=True,
         )
 
         return {
@@ -168,7 +168,7 @@ def get_api_user(
             event_type="jwt_api_auth_failed",
             actor_subject=auth_result.get("subject", "unknown"),
             success=False,
-            error=str(e)
+            error=str(e),
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

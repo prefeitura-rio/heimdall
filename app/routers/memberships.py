@@ -35,8 +35,10 @@ async def add_member_to_group(
     member_data: AddMemberRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
-    membership_service: Annotated[MembershipService, Depends(lambda: MembershipService())],
-    user_service: Annotated[UserService, Depends(lambda: UserService())]
+    membership_service: Annotated[
+        MembershipService, Depends(lambda: MembershipService())
+    ],
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
     Add member to group with complete flow.
@@ -61,41 +63,37 @@ async def add_member_to_group(
             group_name=group_name,
             member_subject=member_data.subject,
             caller_subject=current_user.subject,
-            caller_roles=caller_roles
+            caller_roles=caller_roles,
         )
 
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied to add member to group '{group_name}'"
+                detail=f"Permission denied to add member to group '{group_name}'",
             )
 
         return MembershipResponse(
-            status="member_added",
-            group=group_name,
-            subject=member_data.subject
+            status="member_added", group=group_name, subject=member_data.subject
         )
 
     except ValueError as e:
         if "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e)
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.delete("/groups/{group_name}/members/{subject}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/groups/{group_name}/members/{subject}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def remove_member_from_group(
     group_name: str,
     subject: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
-    membership_service: Annotated[MembershipService, Depends(lambda: MembershipService())],
-    user_service: Annotated[UserService, Depends(lambda: UserService())]
+    membership_service: Annotated[
+        MembershipService, Depends(lambda: MembershipService())
+    ],
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
     Remove member from group.
@@ -111,22 +109,16 @@ async def remove_member_from_group(
             group_name=group_name,
             member_subject=subject,
             caller_subject=current_user.subject,
-            caller_roles=caller_roles
+            caller_roles=caller_roles,
         )
 
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied to remove member from group '{group_name}'"
+                detail=f"Permission denied to remove member from group '{group_name}'",
             )
 
     except ValueError as e:
         if "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e)
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

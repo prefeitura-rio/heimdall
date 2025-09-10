@@ -22,16 +22,21 @@ class RoleService(BaseService):
         self.cache_service = CacheService()
         self.audit_service = AuditService()
 
-    def create_role(self, db: Session, name: str, description: str, created_by: User) -> Role:
+    def create_role(
+        self, db: Session, name: str, description: str, created_by: User
+    ) -> Role:
         """
         Create a new role.
         Implements role creation with proper validation.
         """
-        with self.trace_operation("create_role", {
-            "role.name": name,
-            "role.created_by": created_by.subject,
-            "role.operation": "create"
-        }) as span:
+        with self.trace_operation(
+            "create_role",
+            {
+                "role.name": name,
+                "role.created_by": created_by.subject,
+                "role.operation": "create",
+            },
+        ) as span:
             try:
                 # Check if role already exists
                 existing_role = db.query(Role).filter(Role.name == name).first()
@@ -41,9 +46,7 @@ class RoleService(BaseService):
 
                 # Create new role
                 role = Role(
-                    name=name,
-                    description=description,
-                    created_by=created_by.id
+                    name=name, description=description, created_by=created_by.id
                 )
 
                 db.add(role)
@@ -93,9 +96,7 @@ class RoleService(BaseService):
         List all roles.
         Implements role listing with efficient database queries.
         """
-        with self.trace_operation("list_roles", {
-            "role.operation": "list"
-        }) as span:
+        with self.trace_operation("list_roles", {"role.operation": "list"}) as span:
             try:
                 roles = db.query(Role).order_by(Role.name).all()
 
@@ -116,12 +117,15 @@ class RoleService(BaseService):
         Assign role to group with member policy updates.
         Updates all group members' Cerbos policies.
         """
-        with self.trace_operation("assign_role_to_group", {
-            "role.group_name": group_name,
-            "role.role_name": role_name,
-            "role.assigned_by": assigned_by.subject,
-            "role.operation": "assign_to_group"
-        }) as span:
+        with self.trace_operation(
+            "assign_role_to_group",
+            {
+                "role.group_name": group_name,
+                "role.role_name": role_name,
+                "role.assigned_by": assigned_by.subject,
+                "role.operation": "assign_to_group",
+            },
+        ) as span:
             try:
                 # Find group and role
                 group = db.query(Group).filter(Group.name == group_name).first()
@@ -135,20 +139,20 @@ class RoleService(BaseService):
                     raise ValueError(f"Role '{role_name}' not found")
 
                 # Check if assignment already exists
-                existing = db.query(GroupRole).filter(
-                    GroupRole.group_id == group.id,
-                    GroupRole.role_id == role.id
-                ).first()
+                existing = (
+                    db.query(GroupRole)
+                    .filter(
+                        GroupRole.group_id == group.id, GroupRole.role_id == role.id
+                    )
+                    .first()
+                )
 
                 if existing:
                     span.set_attribute("role.already_assigned", True)
                     return True  # Idempotent operation
 
                 # Create group role assignment
-                group_role = GroupRole(
-                    group_id=group.id,
-                    role_id=role.id
-                )
+                group_role = GroupRole(group_id=group.id, role_id=role.id)
                 db.add(group_role)
                 db.commit()
 
@@ -161,8 +165,12 @@ class RoleService(BaseService):
 
                 # Invalidate user roles cache for all group members
                 for membership in group.memberships:
-                    self.cache_service.invalidate_user_roles_cache(membership.user.subject)
-                span.set_attribute("role.cache_invalidated_members", len(group.memberships))
+                    self.cache_service.invalidate_user_roles_cache(
+                        membership.user.subject
+                    )
+                span.set_attribute(
+                    "role.cache_invalidated_members", len(group.memberships)
+                )
 
                 # Log successful role assignment
                 self.audit_service.safe_log_operation(
@@ -176,7 +184,7 @@ class RoleService(BaseService):
                         "role_assigned": True,
                         "group_id": group.id,
                         "role_id": role.id,
-                        "members_affected": len(group.memberships)
+                        "members_affected": len(group.memberships),
                     },
                     success=True,
                     actor_user_id=assigned_by.id,
@@ -211,12 +219,15 @@ class RoleService(BaseService):
         Remove role from group with policy cleanup.
         Updates all group members' Cerbos policies.
         """
-        with self.trace_operation("remove_role_from_group", {
-            "role.group_name": group_name,
-            "role.role_name": role_name,
-            "role.removed_by": removed_by.subject,
-            "role.operation": "remove_from_group"
-        }) as span:
+        with self.trace_operation(
+            "remove_role_from_group",
+            {
+                "role.group_name": group_name,
+                "role.role_name": role_name,
+                "role.removed_by": removed_by.subject,
+                "role.operation": "remove_from_group",
+            },
+        ) as span:
             try:
                 # Find the group role assignment
                 group_role = (
@@ -244,8 +255,12 @@ class RoleService(BaseService):
 
                 # Invalidate user roles cache for all group members
                 for membership in group.memberships:
-                    self.cache_service.invalidate_user_roles_cache(membership.user.subject)
-                span.set_attribute("role.cache_invalidated_members", len(group.memberships))
+                    self.cache_service.invalidate_user_roles_cache(
+                        membership.user.subject
+                    )
+                span.set_attribute(
+                    "role.cache_invalidated_members", len(group.memberships)
+                )
 
                 # Log successful role removal
                 self.audit_service.safe_log_operation(
@@ -257,7 +272,7 @@ class RoleService(BaseService):
                     request_payload={"group_name": group_name, "role_name": role_name},
                     result={
                         "role_removed": True,
-                        "members_affected": len(group.memberships)
+                        "members_affected": len(group.memberships),
                     },
                     success=True,
                     actor_user_id=removed_by.id,
@@ -285,7 +300,9 @@ class RoleService(BaseService):
                 )
                 raise
 
-    def _update_member_policies_after_role_change(self, db: Session, group: Group, span: trace.Span) -> None:
+    def _update_member_policies_after_role_change(
+        self, db: Session, group: Group, span: trace.Span
+    ) -> None:
         """Update Cerbos policies for all group members after role changes."""
         try:
             members_updated = 0
@@ -299,8 +316,7 @@ class RoleService(BaseService):
                     # Push updated policy to Cerbos
                     if user_roles:
                         policy_pushed = self.cerbos_service.push_user_policy(
-                            user_subject=membership.user.subject,
-                            user_roles=user_roles
+                            user_subject=membership.user.subject, user_roles=user_roles
                         )
                         if policy_pushed:
                             members_updated += 1

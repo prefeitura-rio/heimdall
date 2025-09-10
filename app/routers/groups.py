@@ -40,7 +40,7 @@ async def create_group(
     db: Annotated[Session, Depends(get_db)],
     group_service: Annotated[GroupService, Depends(lambda: GroupService())],
     cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
-    user_service: Annotated[UserService, Depends(lambda: UserService())]
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
     Create a group with Cerbos permission check.
@@ -53,13 +53,13 @@ async def create_group(
     can_create = cerbos_service.can_create_group(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        group_name=group_data.name
+        group_name=group_data.name,
     )
 
     if not can_create:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied to create group '{group_data.name}'"
+            detail=f"Permission denied to create group '{group_data.name}'",
         )
 
     # Create the group
@@ -68,20 +68,17 @@ async def create_group(
             db=db,
             name=group_data.name,
             description=group_data.description,
-            created_by=current_user
+            created_by=current_user,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
     return GroupResponse(
         id=group.id,
         name=group.name,
         description=group.description,
         created_by=group.creator.subject if group.creator else None,
-        created_at=group.created_at.isoformat()
+        created_at=group.created_at.isoformat(),
     )
 
 
@@ -90,7 +87,7 @@ async def list_groups(
     prefix: Annotated[str | None, Query()] = None,
     _current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[Session, Depends(get_db)] = None,
-    group_service: Annotated[GroupService, Depends(lambda: GroupService())] = None
+    group_service: Annotated[GroupService, Depends(lambda: GroupService())] = None,
 ):
     """
     List groups with optional prefix filtering.
@@ -104,7 +101,7 @@ async def list_groups(
             name=group.name,
             description=group.description,
             created_by=group.creator.subject if group.creator else None,
-            created_at=group.created_at.isoformat()
+            created_at=group.created_at.isoformat(),
         )
         for group in groups
     ]
@@ -117,7 +114,7 @@ async def delete_group(
     db: Annotated[Session, Depends(get_db)],
     group_service: Annotated[GroupService, Depends(lambda: GroupService())],
     cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
-    user_service: Annotated[UserService, Depends(lambda: UserService())]
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
     Delete a group with cascading cleanup.
@@ -130,24 +127,22 @@ async def delete_group(
     can_delete = cerbos_service.can_delete_group(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        group_name=group_name
+        group_name=group_name,
     )
 
     if not can_delete:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied to delete group '{group_name}'"
+            detail=f"Permission denied to delete group '{group_name}'",
         )
 
     # Delete the group with cascading cleanup
     deleted = group_service.delete_group(
-        db=db,
-        group_name=group_name,
-        deleted_by=current_user
+        db=db, group_name=group_name, deleted_by=current_user
     )
 
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Group '{group_name}' not found"
+            detail=f"Group '{group_name}' not found",
         )

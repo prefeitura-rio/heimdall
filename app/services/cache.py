@@ -31,7 +31,7 @@ class CacheService(BaseService):
             max_connections=10,
             retry_on_timeout=True,
             socket_timeout=5,
-            socket_connect_timeout=5
+            socket_connect_timeout=5,
         )
         self.redis_client = redis.Redis(connection_pool=self.pool)
 
@@ -53,11 +53,10 @@ class CacheService(BaseService):
         """
         cache_key = f"mapping:{method}:{path}"
 
-        with self.trace_operation("get_mapping_cache", {
-            "cache.key": cache_key,
-            "cache.type": "mapping",
-            "cache.operation": "get"
-        }) as span:
+        with self.trace_operation(
+            "get_mapping_cache",
+            {"cache.key": cache_key, "cache.type": "mapping", "cache.operation": "get"},
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
                 cached_value = redis_conn.get(cache_key)
@@ -65,7 +64,9 @@ class CacheService(BaseService):
                 if cached_value:
                     mapping_data = json.loads(cached_value)
                     span.set_attribute("cache.hit", True)
-                    span.set_attribute("cache.mapping_id", mapping_data.get("mapping_id"))
+                    span.set_attribute(
+                        "cache.mapping_id", mapping_data.get("mapping_id")
+                    )
                     return mapping_data
                 else:
                     span.set_attribute("cache.hit", False)
@@ -78,25 +79,26 @@ class CacheService(BaseService):
                 # Return None on cache errors - fallback to database
                 return None
 
-    def set_mapping_cache(self, path: str, method: str, mapping_data: dict[str, Any]) -> bool:
+    def set_mapping_cache(
+        self, path: str, method: str, mapping_data: dict[str, Any]
+    ) -> bool:
         """
         Set mapping resolution in cache with TTL.
         """
         cache_key = f"mapping:{method}:{path}"
 
-        with self.trace_operation("set_mapping_cache", {
-            "cache.key": cache_key,
-            "cache.type": "mapping",
-            "cache.operation": "set",
-            "cache.ttl": self.mapping_ttl
-        }) as span:
+        with self.trace_operation(
+            "set_mapping_cache",
+            {
+                "cache.key": cache_key,
+                "cache.type": "mapping",
+                "cache.operation": "set",
+                "cache.ttl": self.mapping_ttl,
+            },
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
-                redis_conn.setex(
-                    cache_key,
-                    self.mapping_ttl,
-                    json.dumps(mapping_data)
-                )
+                redis_conn.setex(cache_key, self.mapping_ttl, json.dumps(mapping_data))
 
                 span.set_attribute("cache.set_successful", True)
                 return True
@@ -113,11 +115,14 @@ class CacheService(BaseService):
         Invalidate mapping cache entries.
         If path_pattern is None, invalidates all mapping cache.
         """
-        with self.trace_operation("invalidate_mapping_cache", {
-            "cache.type": "mapping",
-            "cache.operation": "invalidate",
-            "cache.pattern": path_pattern
-        }) as span:
+        with self.trace_operation(
+            "invalidate_mapping_cache",
+            {
+                "cache.type": "mapping",
+                "cache.operation": "invalidate",
+                "cache.pattern": path_pattern,
+            },
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
 
@@ -146,11 +151,14 @@ class CacheService(BaseService):
         """
         cache_key = f"user_roles:{user_subject}"
 
-        with self.trace_operation("get_user_roles_cache", {
-            "cache.key": cache_key,
-            "cache.type": "user_roles",
-            "cache.operation": "get"
-        }) as span:
+        with self.trace_operation(
+            "get_user_roles_cache",
+            {
+                "cache.key": cache_key,
+                "cache.type": "user_roles",
+                "cache.operation": "get",
+            },
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
                 cached_value = redis_conn.get(cache_key)
@@ -176,19 +184,18 @@ class CacheService(BaseService):
         """
         cache_key = f"user_roles:{user_subject}"
 
-        with self.trace_operation("set_user_roles_cache", {
-            "cache.key": cache_key,
-            "cache.type": "user_roles",
-            "cache.operation": "set",
-            "cache.ttl": self.user_roles_ttl
-        }) as span:
+        with self.trace_operation(
+            "set_user_roles_cache",
+            {
+                "cache.key": cache_key,
+                "cache.type": "user_roles",
+                "cache.operation": "set",
+                "cache.ttl": self.user_roles_ttl,
+            },
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
-                redis_conn.setex(
-                    cache_key,
-                    self.user_roles_ttl,
-                    json.dumps(roles)
-                )
+                redis_conn.setex(cache_key, self.user_roles_ttl, json.dumps(roles))
 
                 span.set_attribute("cache.set_successful", True)
                 return True
@@ -204,11 +211,14 @@ class CacheService(BaseService):
         Invalidate user roles cache.
         If user_subject is None, invalidates all user roles cache.
         """
-        with self.trace_operation("invalidate_user_roles_cache", {
-            "cache.type": "user_roles",
-            "cache.operation": "invalidate",
-            "cache.user_subject": user_subject
-        }) as span:
+        with self.trace_operation(
+            "invalidate_user_roles_cache",
+            {
+                "cache.type": "user_roles",
+                "cache.operation": "invalidate",
+                "cache.user_subject": user_subject,
+            },
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
 
@@ -238,11 +248,10 @@ class CacheService(BaseService):
         """
         cache_key = f"jwks:{jwks_url}"
 
-        with self.trace_operation("get_jwks_cache", {
-            "cache.key": cache_key,
-            "cache.type": "jwks",
-            "cache.operation": "get"
-        }) as span:
+        with self.trace_operation(
+            "get_jwks_cache",
+            {"cache.key": cache_key, "cache.type": "jwks", "cache.operation": "get"},
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
                 cached_value = redis_conn.get(cache_key)
@@ -250,7 +259,9 @@ class CacheService(BaseService):
                 if cached_value:
                     jwks_data = json.loads(cached_value)
                     span.set_attribute("cache.hit", True)
-                    span.set_attribute("cache.keys_count", len(jwks_data.get("keys", [])))
+                    span.set_attribute(
+                        "cache.keys_count", len(jwks_data.get("keys", []))
+                    )
                     return jwks_data
                 else:
                     span.set_attribute("cache.hit", False)
@@ -268,19 +279,18 @@ class CacheService(BaseService):
         """
         cache_key = f"jwks:{jwks_url}"
 
-        with self.trace_operation("set_jwks_cache", {
-            "cache.key": cache_key,
-            "cache.type": "jwks",
-            "cache.operation": "set",
-            "cache.ttl": self.jwks_ttl
-        }) as span:
+        with self.trace_operation(
+            "set_jwks_cache",
+            {
+                "cache.key": cache_key,
+                "cache.type": "jwks",
+                "cache.operation": "set",
+                "cache.ttl": self.jwks_ttl,
+            },
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
-                redis_conn.setex(
-                    cache_key,
-                    self.jwks_ttl,
-                    json.dumps(jwks_data)
-                )
+                redis_conn.setex(cache_key, self.jwks_ttl, json.dumps(jwks_data))
 
                 span.set_attribute("cache.set_successful", True)
                 return True
@@ -295,9 +305,9 @@ class CacheService(BaseService):
         """
         Check Redis connection health.
         """
-        with self.trace_operation("health_check", {
-            "cache.operation": "health_check"
-        }) as span:
+        with self.trace_operation(
+            "health_check", {"cache.operation": "health_check"}
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
                 response = redis_conn.ping()
@@ -315,9 +325,9 @@ class CacheService(BaseService):
         """
         Get cache statistics for monitoring.
         """
-        with self.trace_operation("get_cache_stats", {
-            "cache.operation": "stats"
-        }) as span:
+        with self.trace_operation(
+            "get_cache_stats", {"cache.operation": "stats"}
+        ) as span:
             try:
                 redis_conn = self._get_redis_connection()
                 info = redis_conn.info()
@@ -345,4 +355,3 @@ class CacheService(BaseService):
                 span.set_attribute("cache.error", str(e))
                 span.set_attribute("cache.stats_retrieved", False)
                 return {"error": str(e)}
-

@@ -14,17 +14,18 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from opentelemetry import trace
 
+from app.config import validate_environment
 from app.database import get_db_session
 from app.models import User
 from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cerbos import CerbosService
 from app.services.user import UserService
+from app.tracing import setup_tracing
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,12 @@ class BackgroundTaskService(BaseService):
         self.audit_service = AuditService()
 
         # Configuration from environment
-        self.reconcile_interval = int(os.getenv("RECONCILE_INTERVAL_SECONDS", "300"))  # 5 minutes
-        self.sync_retry_interval = int(os.getenv("SYNC_RETRY_INTERVAL_SECONDS", "60"))  # 1 minute
+        self.reconcile_interval = int(
+            os.getenv("RECONCILE_INTERVAL_SECONDS", "300")
+        )  # 5 minutes
+        self.sync_retry_interval = int(
+            os.getenv("SYNC_RETRY_INTERVAL_SECONDS", "60")
+        )  # 1 minute
 
         # Shutdown flag
         self.shutdown_requested = False
@@ -51,10 +56,10 @@ class BackgroundTaskService(BaseService):
         Reconciliation task that walks all users and ensures Cerbos policies reflect DB state.
         Implements reconciliation as specified in SPEC.md Section 3.6.
         """
-        with self.trace_operation("reconcile_cerbos_policies", {
-            "task.type": "reconciliation",
-            "task.scheduled": True
-        }) as span:
+        with self.trace_operation(
+            "reconcile_cerbos_policies",
+            {"task.type": "reconciliation", "task.scheduled": True},
+        ) as span:
             try:
                 logger.info("Starting Cerbos policy reconciliation")
 
@@ -78,14 +83,15 @@ class BackgroundTaskService(BaseService):
                             # Update Cerbos policy for this user
                             if user_roles:
                                 policy_pushed = self.cerbos_service.push_user_policy(
-                                    user_subject=user.subject,
-                                    user_roles=user_roles
+                                    user_subject=user.subject, user_roles=user_roles
                                 )
                                 if policy_pushed:
                                     users_updated += 1
                                 else:
                                     users_failed += 1
-                                    logger.warning(f"Failed to update policy for user {user.subject}")
+                                    logger.warning(
+                                        f"Failed to update policy for user {user.subject}"
+                                    )
                             else:
                                 # User has no roles, delete their policy if it exists
                                 self.cerbos_service.delete_user_policy(user.subject)
@@ -99,7 +105,9 @@ class BackgroundTaskService(BaseService):
                             span.record_exception(e)
 
                     # Log reconciliation results
-                    span.set_attribute("reconciliation.users_processed", users_processed)
+                    span.set_attribute(
+                        "reconciliation.users_processed", users_processed
+                    )
                     span.set_attribute("reconciliation.users_updated", users_updated)
                     span.set_attribute("reconciliation.users_failed", users_failed)
 
@@ -115,13 +123,15 @@ class BackgroundTaskService(BaseService):
                             "total_users": len(users),
                             "users_processed": users_processed,
                             "users_updated": users_updated,
-                            "users_failed": users_failed
+                            "users_failed": users_failed,
                         },
                         success=users_failed == 0,
                     )
 
-                    logger.info(f"Reconciliation completed: {users_processed} users processed, "
-                              f"{users_updated} updated, {users_failed} failed")
+                    logger.info(
+                        f"Reconciliation completed: {users_processed} users processed, "
+                        f"{users_updated} updated, {users_failed} failed"
+                    )
 
                 finally:
                     session.close()
@@ -137,10 +147,9 @@ class BackgroundTaskService(BaseService):
         Sync retry task that handles failed Cerbos operations with exponential backoff.
         Implements sync retry logic as specified in SPEC.md Section 3.6.
         """
-        with self.trace_operation("retry_failed_syncs", {
-            "task.type": "sync_retry",
-            "task.scheduled": True
-        }) as span:
+        with self.trace_operation(
+            "retry_failed_syncs", {"task.type": "sync_retry", "task.scheduled": True}
+        ) as span:
             try:
                 logger.info("Starting failed sync retry")
 
@@ -170,7 +179,7 @@ class BackgroundTaskService(BaseService):
                         result={
                             "operations_found": 0,
                             "operations_retried": 0,
-                            "operations_succeeded": 0
+                            "operations_succeeded": 0,
                         },
                         success=True,
                     )
@@ -210,8 +219,12 @@ class BackgroundTaskService(BaseService):
             max_instances=1,  # Ensure only one instance runs at a time
         )
 
-        logger.info(f"Scheduled reconciliation task every {self.reconcile_interval} seconds")
-        logger.info(f"Scheduled sync retry task every {self.sync_retry_interval} seconds")
+        logger.info(
+            f"Scheduled reconciliation task every {self.reconcile_interval} seconds"
+        )
+        logger.info(
+            f"Scheduled sync retry task every {self.sync_retry_interval} seconds"
+        )
 
     def signal_handler(self, signum: int, _frame: Any) -> None:
         """Handle shutdown signals gracefully."""
@@ -221,6 +234,14 @@ class BackgroundTaskService(BaseService):
     async def run(self) -> None:
         """Main entry point for background tasks."""
         logger.info("Starting Heimdall background tasks service")
+
+        # Validate environment configuration
+        try:
+            validate_environment()
+            logger.info("Environment configuration validation successful")
+        except Exception as e:
+            logger.error(f"Environment configuration validation failed: {e}")
+            sys.exit(1)
 
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -249,6 +270,16 @@ class BackgroundTaskService(BaseService):
 
 async def main() -> None:
     """Main entry point for the background tasks container."""
+    # Initialize OpenTelemetry tracing (optional)
+    tracing_enabled = setup_tracing()
+
+    if tracing_enabled:
+        logger.info("OpenTelemetry tracing enabled for background tasks")
+    else:
+        logger.info(
+            "OpenTelemetry tracing disabled - OTEL_EXPORTER_OTLP_ENDPOINT not set"
+        )
+
     service = BackgroundTaskService()
     await service.run()
 

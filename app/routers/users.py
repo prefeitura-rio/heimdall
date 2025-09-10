@@ -21,7 +21,7 @@ async def get_user_by_subject(
     subject: str,
     _current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
-    user_service: Annotated[UserService, Depends(lambda: UserService())]
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
     Get user by subject with groups and roles.
@@ -33,7 +33,7 @@ async def get_user_by_subject(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with subject '{subject}' not found"
+            detail=f"User with subject '{subject}' not found",
         )
 
     # Get user's roles and groups
@@ -48,5 +48,5 @@ async def get_user_by_subject(
         "subject": user.subject,
         "display_name": user.display_name,
         "groups": group_names,
-        "roles": user_roles
+        "roles": user_roles,
     }

@@ -59,7 +59,7 @@ async def resolve_mapping(
     method: Annotated[str, Query(description="The HTTP method")],
     _current_user: Annotated[dict, Depends(get_api_user)],
     db: Annotated[Session, Depends(get_db)],
-    mapping_service: Annotated[MappingService, Depends(lambda: MappingService())]
+    mapping_service: Annotated[MappingService, Depends(lambda: MappingService())],
 ):
     """
     Resolve path and method to action.
@@ -70,20 +70,22 @@ async def resolve_mapping(
     if not mapping:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No mapping found for path '{path}' and method '{method}'"
+            detail=f"No mapping found for path '{path}' and method '{method}'",
         )
 
     return MappingResponse(**mapping)
 
 
-@router.post("/", status_code=status.HTTP_201_CREATED, response_model=MappingDetailResponse)
+@router.post(
+    "/", status_code=status.HTTP_201_CREATED, response_model=MappingDetailResponse
+)
 async def create_mapping(
     mapping_data: MappingCreateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     mapping_service: Annotated[MappingService, Depends(lambda: MappingService())],
     cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
-    user_service: Annotated[UserService, Depends(lambda: UserService())]
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
     Create a new mapping.
@@ -96,13 +98,13 @@ async def create_mapping(
     can_create = cerbos_service.can_create_mapping(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action_name=mapping_data.action
+        action_name=mapping_data.action,
     )
 
     if not can_create:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied to create mappings"
+            detail="Permission denied to create mappings",
         )
 
     # Create the mapping
@@ -113,13 +115,10 @@ async def create_mapping(
             method=mapping_data.method,
             action_name=mapping_data.action,
             description=mapping_data.description,
-            created_by=current_user
+            created_by=current_user,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
     return MappingDetailResponse(
         id=mapping.id,
@@ -129,7 +128,7 @@ async def create_mapping(
         description=mapping.description,
         created_by=mapping.creator.subject if mapping.creator else None,
         created_at=mapping.created_at.isoformat(),
-        updated_at=mapping.updated_at.isoformat() if mapping.updated_at else None
+        updated_at=mapping.updated_at.isoformat() if mapping.updated_at else None,
     )
 
 
@@ -141,7 +140,7 @@ async def update_mapping(
     db: Annotated[Session, Depends(get_db)],
     mapping_service: Annotated[MappingService, Depends(lambda: MappingService())],
     cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
-    user_service: Annotated[UserService, Depends(lambda: UserService())]
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
     Update an existing mapping.
@@ -154,13 +153,13 @@ async def update_mapping(
     can_update = cerbos_service.can_update_mapping(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        mapping_id=mapping_id
+        mapping_id=mapping_id,
     )
 
     if not can_update:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied to update mapping {mapping_id}"
+            detail=f"Permission denied to update mapping {mapping_id}",
         )
 
     # Update the mapping
@@ -172,13 +171,10 @@ async def update_mapping(
             method=mapping_data.method,
             action_name=mapping_data.action,
             description=mapping_data.description,
-            updated_by=current_user
+            updated_by=current_user,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     return MappingDetailResponse(
         id=mapping.id,
@@ -188,7 +184,7 @@ async def update_mapping(
         description=mapping.description,
         created_by=mapping.creator.subject if mapping.creator else None,
         created_at=mapping.created_at.isoformat(),
-        updated_at=mapping.updated_at.isoformat() if mapping.updated_at else None
+        updated_at=mapping.updated_at.isoformat() if mapping.updated_at else None,
     )
 
 
@@ -199,7 +195,7 @@ async def delete_mapping(
     db: Annotated[Session, Depends(get_db)],
     mapping_service: Annotated[MappingService, Depends(lambda: MappingService())],
     cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
-    user_service: Annotated[UserService, Depends(lambda: UserService())]
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
     Delete a mapping.
@@ -212,27 +208,25 @@ async def delete_mapping(
     can_delete = cerbos_service.can_delete_mapping(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        mapping_id=mapping_id
+        mapping_id=mapping_id,
     )
 
     if not can_delete:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied to delete mapping {mapping_id}"
+            detail=f"Permission denied to delete mapping {mapping_id}",
         )
 
     # Delete the mapping
     try:
         success = mapping_service.delete_mapping(
-            db=db,
-            mapping_id=mapping_id,
-            deleted_by=current_user
+            db=db, mapping_id=mapping_id, deleted_by=current_user
         )
 
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete mapping"
+                detail="Failed to delete mapping",
             )
 
     except ValueError:
@@ -245,7 +239,9 @@ async def list_mappings(
     _current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     mapping_service: Annotated[MappingService, Depends(lambda: MappingService())],
-    action_filter: Annotated[str | None, Query(description="Filter by action name")] = None
+    action_filter: Annotated[
+        str | None, Query(description="Filter by action name")
+    ] = None,
 ):
     """
     List all mappings with optional filtering.
@@ -262,7 +258,7 @@ async def list_mappings(
             description=mapping.description,
             created_by=mapping.creator.subject if mapping.creator else None,
             created_at=mapping.created_at.isoformat(),
-            updated_at=mapping.updated_at.isoformat() if mapping.updated_at else None
+            updated_at=mapping.updated_at.isoformat() if mapping.updated_at else None,
         )
         for mapping in mappings
     ]

@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -26,6 +27,12 @@ class Action(Base):
 
     __tablename__ = "actions"
 
+    # Performance indexes for action queries
+    __table_args__ = (
+        # Index for action name lookups (frequent in mapping resolution)
+        Index("ix_actions_name", "name"),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -40,6 +47,12 @@ class Role(Base):
     """Roles table - represents roles that can be assigned."""
 
     __tablename__ = "roles"
+
+    # Performance indexes for role queries
+    __table_args__ = (
+        # Index for role name lookups (very frequent)
+        Index("ix_roles_name", "name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
@@ -58,6 +71,16 @@ class User(Base):
     """Users table - Keycloak subject storage."""
 
     __tablename__ = "users"
+
+    # Performance indexes for frequently queried columns
+    __table_args__ = (
+        # Index for subject lookups (most frequent query)
+        Index("ix_users_subject", "subject"),
+        # Index for display_name searches (if needed for user lookups)
+        Index("ix_users_display_name", "display_name"),
+        # Index for created_at for chronological queries
+        Index("ix_users_created_at", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     subject: Mapped[str] = mapped_column(String, unique=True, nullable=False)
@@ -102,6 +125,22 @@ class Group(Base):
 
     __tablename__ = "groups"
 
+    # Performance indexes for frequently queried columns
+    __table_args__ = (
+        # Index for name lookups (very frequent query)
+        Index("ix_groups_name", "name"),
+        # Index for prefix searches (GET /groups?prefix=)
+        Index(
+            "ix_groups_name_prefix",
+            "name",
+            postgresql_ops={"name": "varchar_pattern_ops"},
+        ),
+        # Index for created_by foreign key lookups
+        Index("ix_groups_created_by", "created_by"),
+        # Index for created_at for chronological queries
+        Index("ix_groups_created_at", "created_at"),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -135,6 +174,26 @@ class Endpoint(Base):
 
     __tablename__ = "endpoints"
 
+    # Performance indexes for mapping resolution
+    __table_args__ = (
+        # Composite index for path/method mapping resolution (most critical)
+        Index("ix_endpoints_method_path", "method", "path_pattern"),
+        # Index for method filtering in resolution
+        Index("ix_endpoints_method", "method"),
+        # Index for action_id lookups
+        Index("ix_endpoints_action_id", "action_id"),
+        # Index for path pattern searches
+        Index("ix_endpoints_path_pattern", "path_pattern"),
+        # Index for created_by auditing
+        Index("ix_endpoints_created_by", "created_by"),
+        # Index for chronological queries
+        Index("ix_endpoints_created_at", "created_at"),
+        # Index for updated_at queries
+        Index("ix_endpoints_updated_at", "updated_at"),
+        # Unique constraint for path_pattern + method combination
+        UniqueConstraint("path_pattern", "method", name="uq_endpoints_path_method"),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     path_pattern: Mapped[str] = mapped_column(String, nullable=False)
     method: Mapped[str] = mapped_column(String, nullable=False)
@@ -155,10 +214,6 @@ class Endpoint(Base):
         nullable=False,
     )
 
-    __table_args__ = (
-        UniqueConstraint("path_pattern", "method", name="uq_endpoints_path_method"),
-    )
-
     # Relationships
     action: Mapped[Action] = relationship("Action", back_populates="endpoints")
     creator: Mapped[User | None] = relationship(
@@ -170,6 +225,16 @@ class GroupRole(Base):
     """Group roles table - group to role mapping."""
 
     __tablename__ = "group_roles"
+
+    # Performance indexes for role aggregation
+    __table_args__ = (
+        # Index for group_id lookups (get all roles for a group)
+        Index("ix_group_roles_group_id", "group_id"),
+        # Index for role_id lookups (get all groups with a role)
+        Index("ix_group_roles_role_id", "role_id"),
+        # Composite index for specific role checks
+        Index("ix_group_roles_group_role", "group_id", "role_id"),
+    )
 
     group_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
@@ -187,6 +252,20 @@ class Membership(Base):
     """Memberships table - group membership."""
 
     __tablename__ = "memberships"
+
+    # Performance indexes for role aggregation queries
+    __table_args__ = (
+        # Index for user_id lookups (get all groups for a user)
+        Index("ix_memberships_user_id", "user_id"),
+        # Index for group_id lookups (get all users in a group)
+        Index("ix_memberships_group_id", "group_id"),
+        # Composite index for membership checks
+        Index("ix_memberships_group_user", "group_id", "user_id"),
+        # Index for granted_by auditing
+        Index("ix_memberships_granted_by", "granted_by"),
+        # Index for chronological queries
+        Index("ix_memberships_granted_at", "granted_at"),
+    )
 
     group_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
@@ -215,6 +294,20 @@ class UserRole(Base):
     """User roles table - direct user to role assignments if needed."""
 
     __tablename__ = "user_roles"
+
+    # Performance indexes for direct role assignments
+    __table_args__ = (
+        # Index for user_id lookups (get all direct roles for a user)
+        Index("ix_user_roles_user_id", "user_id"),
+        # Index for role_id lookups (get all users with a direct role)
+        Index("ix_user_roles_role_id", "role_id"),
+        # Composite index for specific user-role checks (e.g., superadmin lookup)
+        Index("ix_user_roles_user_role", "user_id", "role_id"),
+        # Index for granted_by auditing
+        Index("ix_user_roles_granted_by", "granted_by"),
+        # Index for chronological queries
+        Index("ix_user_roles_granted_at", "granted_at"),
+    )
 
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
@@ -257,6 +350,12 @@ class GroupManagementRight(Base):
     )
 
     __table_args__ = (
+        # Performance indexes for group management right queries
+        Index("ix_group_mgmt_rights_manager_group_id", "manager_group_id"),
+        Index("ix_group_mgmt_rights_target_pattern", "target_group_pattern"),
+        Index("ix_group_mgmt_rights_created_by", "created_by"),
+        Index("ix_group_mgmt_rights_created_at", "created_at"),
+        # Unique constraint for manager_group_id + target_group_pattern
         UniqueConstraint(
             "manager_group_id",
             "target_group_pattern",
@@ -279,6 +378,26 @@ class AdminAudit(Base):
     """Admin audit table - audit log for admin operations."""
 
     __tablename__ = "admin_audit"
+
+    # Performance indexes for audit queries
+    __table_args__ = (
+        # Index for actor_subject filtering (most common audit query)
+        Index("ix_admin_audit_actor_subject", "actor_subject"),
+        # Index for operation filtering
+        Index("ix_admin_audit_operation", "operation"),
+        # Index for target_type filtering
+        Index("ix_admin_audit_target_type", "target_type"),
+        # Index for success filtering (error analysis)
+        Index("ix_admin_audit_success", "success"),
+        # Index for timestamp (chronological queries, very important)
+        Index("ix_admin_audit_timestamp", "timestamp"),
+        # Index for actor_user_id foreign key
+        Index("ix_admin_audit_actor_user_id", "actor_user_id"),
+        # Composite index for common filtering combinations
+        Index("ix_admin_audit_actor_operation", "actor_subject", "operation"),
+        Index("ix_admin_audit_operation_timestamp", "operation", "timestamp"),
+        Index("ix_admin_audit_target_type_timestamp", "target_type", "timestamp"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     actor_user_id: Mapped[int | None] = mapped_column(

@@ -12,9 +12,11 @@ import psutil
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.config import get_config
 from app.database import get_db
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
+from app.services.database_monitor import get_database_monitor
 
 router = APIRouter(prefix="/api/v1", tags=["health"])
 
@@ -38,7 +40,7 @@ async def health_check() -> dict[str, Any]:
     return {
         "status": "healthy",
         "service": "heimdall-admin-service",
-        "timestamp": datetime.now(UTC).isoformat()
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -53,12 +55,7 @@ async def readiness_check(
     Verifies that all dependencies are ready and accessible.
     Returns 200 if ready, 503 if not ready.
     """
-    checks = {
-        "database": False,
-        "cache": False,
-        "cerbos": False,
-        "overall": False
-    }
+    checks = {"database": False, "cache": False, "cerbos": False, "overall": False}
 
     errors = []
 
@@ -99,7 +96,7 @@ async def readiness_check(
         "status": "ready" if checks["overall"] else "not_ready",
         "checks": checks,
         "service": "heimdall-admin-service",
-        "timestamp": datetime.now(UTC).isoformat()
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     if errors:
@@ -107,8 +104,7 @@ async def readiness_check(
 
     if not checks["overall"]:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=response
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=response
         )
 
     return response
@@ -126,13 +122,13 @@ async def version_info() -> dict[str, Any]:
         "build": {
             "commit": os.getenv("GIT_COMMIT", "unknown"),
             "date": os.getenv("BUILD_DATE", "unknown"),
-            "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}.{psutil.sys.version_info.micro}"
+            "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}.{psutil.sys.version_info.micro}",
         },
         "environment": {
             "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}.{psutil.sys.version_info.micro}",
             "platform": platform.system(),
-            "architecture": platform.machine()
-        }
+            "architecture": platform.machine(),
+        },
     }
 
 
@@ -159,11 +155,49 @@ async def metrics_info(
                 "total": memory.total,
                 "available": memory.available,
                 "percent": memory.percent,
-                "used": memory.used
+                "used": memory.used,
             },
-            "cpu": {
-                "percent": cpu_percent
-            }
+            "cpu": {"percent": cpu_percent},
         },
-        "cache": cache_stats
+        "cache": cache_stats,
+    }
+
+
+@router.get("/config")
+async def config_info() -> dict[str, Any]:
+    """
+    Configuration information endpoint.
+    Returns safe configuration summary (sensitive values masked).
+    """
+    config = get_config()
+    return {
+        "service": "heimdall-admin-service",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "configuration": config.get_config_summary(),
+        "validation_status": "valid",
+    }
+
+
+@router.get("/database")
+async def database_info(
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Database performance and health information endpoint.
+    Returns database statistics, performance metrics, and optimization suggestions.
+    """
+    monitor = get_database_monitor()
+
+    # Get comprehensive database health info
+    health_info = monitor.check_database_health(db)
+
+    # Get optimization suggestions
+    suggestions = monitor.suggest_optimizations()
+
+    return {
+        "service": "heimdall-admin-service",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "database_health": health_info,
+        "optimization_suggestions": suggestions,
+        "monitoring_enabled": True,
     }

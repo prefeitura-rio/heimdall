@@ -3,7 +3,6 @@ Group management service with OpenTelemetry tracing.
 Implements group management operations with transaction safety and Cerbos integration.
 """
 
-
 from opentelemetry import trace
 from sqlalchemy.orm import Session
 
@@ -26,11 +25,14 @@ class GroupService(BaseService):
         Create a new group.
         Implements group creation with proper transaction management.
         """
-        with self.trace_operation("create_group", {
-            "group.name": name,
-            "group.created_by": created_by.subject,
-            "group.operation": "create"
-        }) as span:
+        with self.trace_operation(
+            "create_group",
+            {
+                "group.name": name,
+                "group.created_by": created_by.subject,
+                "group.operation": "create",
+            },
+        ) as span:
             try:
                 # Check if group already exists
                 existing_group = db.query(Group).filter(Group.name == name).first()
@@ -40,9 +42,7 @@ class GroupService(BaseService):
 
                 # Create new group
                 group = Group(
-                    name=name,
-                    description=description,
-                    created_by=created_by.id
+                    name=name, description=description, created_by=created_by.id
                 )
 
                 db.add(group)
@@ -92,10 +92,9 @@ class GroupService(BaseService):
         List groups with optional prefix filtering.
         Implements group listing with efficient database queries.
         """
-        with self.trace_operation("list_groups", {
-            "group.prefix": prefix or "",
-            "group.operation": "list"
-        }) as span:
+        with self.trace_operation(
+            "list_groups", {"group.prefix": prefix or "", "group.operation": "list"}
+        ) as span:
             try:
                 query = db.query(Group)
 
@@ -115,18 +114,19 @@ class GroupService(BaseService):
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 raise
 
-    def delete_group(
-        self, db: Session, group_name: str, deleted_by: User
-    ) -> bool:
+    def delete_group(self, db: Session, group_name: str, deleted_by: User) -> bool:
         """
         Delete a group with cascading cleanup of memberships and roles.
         Implements group deletion with proper transaction management.
         """
-        with self.trace_operation("delete_group", {
-            "group.name": group_name,
-            "group.deleted_by": deleted_by.subject,
-            "group.operation": "delete"
-        }) as span:
+        with self.trace_operation(
+            "delete_group",
+            {
+                "group.name": group_name,
+                "group.deleted_by": deleted_by.subject,
+                "group.operation": "delete",
+            },
+        ) as span:
             try:
                 # Find the group
                 group = db.query(Group).filter(Group.name == group_name).first()
@@ -161,7 +161,7 @@ class GroupService(BaseService):
                     result={
                         "deleted": True,
                         "memberships_removed": memberships_count,
-                        "group_roles_removed": group_roles_count
+                        "group_roles_removed": group_roles_count,
                     },
                     success=True,
                     actor_user_id=deleted_by.id,
@@ -191,10 +191,9 @@ class GroupService(BaseService):
 
     def get_group_by_name(self, db: Session, name: str) -> Group | None:
         """Get group by name with tracing."""
-        with self.trace_operation("get_group_by_name", {
-            "group.name": name,
-            "group.operation": "get_by_name"
-        }) as span:
+        with self.trace_operation(
+            "get_group_by_name", {"group.name": name, "group.operation": "get_by_name"}
+        ) as span:
             try:
                 group = db.query(Group).filter(Group.name == name).first()
 

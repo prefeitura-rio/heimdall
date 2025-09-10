@@ -67,7 +67,10 @@ class MembershipService(BaseService):
                             operation="add_member",
                             target_type="membership",
                             target_id=f"group:{group_name}:member:{member_subject}",
-                            request_payload={"group_name": group_name, "member_subject": member_subject},
+                            request_payload={
+                                "group_name": group_name,
+                                "member_subject": member_subject,
+                            },
                             result={"error": "Permission denied"},
                             success=False,
                         )
@@ -130,16 +133,19 @@ class MembershipService(BaseService):
                 with self.tracer.start_span("update_cerbos_policies") as policy_span:
                     try:
                         # Get user's updated roles after membership addition
-                        user_roles = self._get_user_roles_after_membership_change(db, user)
+                        user_roles = self._get_user_roles_after_membership_change(
+                            db, user
+                        )
 
                         # Push updated policy to Cerbos
                         policy_pushed = self.cerbos_service.push_user_policy(
-                            user_subject=member_subject,
-                            user_roles=user_roles
+                            user_subject=member_subject, user_roles=user_roles
                         )
 
                         policy_span.set_attribute("cerbos.policy_pushed", policy_pushed)
-                        policy_span.set_attribute("cerbos.user_roles_count", len(user_roles))
+                        policy_span.set_attribute(
+                            "cerbos.user_roles_count", len(user_roles)
+                        )
 
                         if not policy_pushed:
                             # Policy push failed, but we don't rollback the membership
@@ -157,12 +163,15 @@ class MembershipService(BaseService):
                     operation="add_member",
                     target_type="membership",
                     target_id=f"group:{group_name}:member:{member_subject}",
-                    request_payload={"group_name": group_name, "member_subject": member_subject},
+                    request_payload={
+                        "group_name": group_name,
+                        "member_subject": member_subject,
+                    },
                     result={
                         "membership_created": True,
                         "group_id": group.id,
                         "user_id": user.id,
-                        "policy_pushed": policy_pushed
+                        "policy_pushed": policy_pushed,
                     },
                     success=True,
                 )
@@ -183,7 +192,10 @@ class MembershipService(BaseService):
                     operation="add_member",
                     target_type="membership",
                     target_id=f"group:{group_name}:member:{member_subject}",
-                    request_payload={"group_name": group_name, "member_subject": member_subject},
+                    request_payload={
+                        "group_name": group_name,
+                        "member_subject": member_subject,
+                    },
                     result={"error": str(e)},
                     success=False,
                 )
@@ -230,7 +242,10 @@ class MembershipService(BaseService):
                         operation="remove_member",
                         target_type="membership",
                         target_id=f"group:{group_name}:member:{member_subject}",
-                        request_payload={"group_name": group_name, "member_subject": member_subject},
+                        request_payload={
+                            "group_name": group_name,
+                            "member_subject": member_subject,
+                        },
                         result={"error": "Permission denied"},
                         success=False,
                     )
@@ -266,8 +281,7 @@ class MembershipService(BaseService):
                     # Push updated policy to Cerbos (or delete if no roles left)
                     if user_roles:
                         self.cerbos_service.push_user_policy(
-                            user_subject=member_subject,
-                            user_roles=user_roles
+                            user_subject=member_subject, user_roles=user_roles
                         )
                     else:
                         # User has no roles left, delete their policy
@@ -285,7 +299,10 @@ class MembershipService(BaseService):
                     operation="remove_member",
                     target_type="membership",
                     target_id=f"group:{group_name}:member:{member_subject}",
-                    request_payload={"group_name": group_name, "member_subject": member_subject},
+                    request_payload={
+                        "group_name": group_name,
+                        "member_subject": member_subject,
+                    },
                     result={
                         "membership_removed": True,
                         "remaining_roles_count": len(user_roles),
@@ -309,13 +326,18 @@ class MembershipService(BaseService):
                     operation="remove_member",
                     target_type="membership",
                     target_id=f"group:{group_name}:member:{member_subject}",
-                    request_payload={"group_name": group_name, "member_subject": member_subject},
+                    request_payload={
+                        "group_name": group_name,
+                        "member_subject": member_subject,
+                    },
                     result={"error": str(e)},
                     success=False,
                 )
                 raise
 
-    def _get_user_roles_after_membership_change(self, db: Session, user: User) -> list[str]:
+    def _get_user_roles_after_membership_change(
+        self, db: Session, user: User
+    ) -> list[str]:
         """Get user's roles after membership changes for policy updates."""
         roles = set()
 

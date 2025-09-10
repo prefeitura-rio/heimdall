@@ -31,7 +31,9 @@ class UserService(BaseService):
         # Use subject field (which contains preferred_username/CPF) as the user identifier
         subject = jwt_payload.get("subject")
         if not subject:
-            raise ValueError("JWT payload missing 'subject' field (should contain CPF from preferred_username)")
+            raise ValueError(
+                "JWT payload missing 'subject' field (should contain CPF from preferred_username)"
+            )
 
         with self.trace_operation(
             "get_or_create_user",
@@ -95,7 +97,9 @@ class UserService(BaseService):
 
         return None
 
-    def _ensure_superadmin_role(self, db: Session, user: User, jwt_payload: dict[str, Any], span: trace.Span) -> None:
+    def _ensure_superadmin_role(
+        self, db: Session, user: User, jwt_payload: dict[str, Any], span: trace.Span
+    ) -> None:
         """
         Check if user has heimdall-admin client role and automatically assign superadmin role.
         Implements automatic role assignment as specified in SPEC.md Section 3.1.
@@ -127,7 +131,7 @@ class UserService(BaseService):
             if not superadmin_role:
                 superadmin_role = Role(
                     name="superadmin",
-                    description="Super administrator with full system access"
+                    description="Super administrator with full system access",
                 )
                 db.add(superadmin_role)
                 db.flush()  # Get the ID
@@ -137,7 +141,7 @@ class UserService(BaseService):
             user_role = UserRole(
                 user_id=user.id,
                 role_id=superadmin_role.id,
-                granted_by=user.id  # Self-granted through JWT
+                granted_by=user.id,  # Self-granted through JWT
             )
             db.add(user_role)
             db.commit()
@@ -163,7 +167,9 @@ class UserService(BaseService):
 
         return "heimdall-admin" in client_roles
 
-    def _remove_superadmin_if_exists(self, db: Session, user: User, span: trace.Span) -> None:
+    def _remove_superadmin_if_exists(
+        self, db: Session, user: User, span: trace.Span
+    ) -> None:
         """Remove superadmin role if user no longer has heimdall-admin role."""
         try:
             existing_superadmin = (

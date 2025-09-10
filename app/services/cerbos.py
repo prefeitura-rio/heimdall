@@ -418,9 +418,9 @@ class CerbosService(BaseService):
         Check Cerbos API health.
         Returns True if Cerbos is reachable and responding.
         """
-        with self.trace_operation("health_check", {
-            "cerbos.operation": "health_check"
-        }) as span:
+        with self.trace_operation(
+            "health_check", {"cerbos.operation": "health_check"}
+        ) as span:
             try:
                 # Simple connectivity test - try to make a basic request to Cerbos
                 # In a real implementation, Cerbos might have a dedicated health endpoint
@@ -431,23 +431,18 @@ class CerbosService(BaseService):
                         "id": "health-check",
                         "roles": [],
                         "policyVersion": "default",
-                        "attr": {}
+                        "attr": {},
                     },
-                    "resources": [{
-                        "resource": {
-                            "id": "health-check",
-                            "attr": {}
-                        },
-                        "actions": ["read"]
-                    }]
+                    "resources": [
+                        {
+                            "resource": {"id": "health-check", "attr": {}},
+                            "actions": ["read"],
+                        }
+                    ],
                 }
 
                 def _make_health_request():
-                    return requests.post(
-                        self.check_url,
-                        json=test_payload,
-                        timeout=5
-                    )
+                    return requests.post(self.check_url, json=test_payload, timeout=5)
 
                 response = self._retry_with_backoff(_make_health_request)
 

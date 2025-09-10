@@ -38,7 +38,9 @@ class AuthService(BaseService):
                 cached_jwks = self.cache_service.get_jwks_cache(self.jwks_url)
                 if cached_jwks:
                     span.set_attribute("auth.jwks_cache_hit", True)
-                    span.set_attribute("auth.jwks_keys_count", len(cached_jwks.get("keys", [])))
+                    span.set_attribute(
+                        "auth.jwks_keys_count", len(cached_jwks.get("keys", []))
+                    )
                     return cached_jwks
 
                 span.set_attribute("auth.jwks_cache_hit", False)
@@ -53,7 +55,9 @@ class AuthService(BaseService):
                 span.set_attribute("auth.jwks_cached", True)
 
                 span.set_attribute("auth.jwks_fetched", True)
-                span.set_attribute("auth.jwks_keys_count", len(jwks_data.get("keys", [])))
+                span.set_attribute(
+                    "auth.jwks_keys_count", len(jwks_data.get("keys", []))
+                )
 
                 return jwks_data
 
@@ -128,7 +132,9 @@ class AuthService(BaseService):
 
                 # Extract user information - use preferred_username (CPF) as subject
                 user_info = {
-                    "subject": payload.get("preferred_username"),  # CPF as primary identifier
+                    "subject": payload.get(
+                        "preferred_username"
+                    ),  # CPF as primary identifier
                     "sub": payload.get("sub"),  # Keep original sub for reference
                     "preferred_username": payload.get("preferred_username"),
                     "email": payload.get("email"),
