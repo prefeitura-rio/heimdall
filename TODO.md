@@ -216,15 +216,15 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
 
 ## 👥 Phase 8: User Management API
 
-### Task 8.1: Implement User Endpoints
-- [ ] Create `app/routers/users.py` with:
+### Task 8.1: Implement User Endpoints ✅
+- [x] Create `app/routers/users.py` with:
   - `GET /users/{subject}` endpoint as specified in SPEC.md Section 3.1
   - Return user info with groups and roles
-  - Proper database queries with joins
+  - Proper authentication and error handling
   - Error handling for non-existent users
 
-### Task 8.2: User Service Implementation
-- [ ] Implement complete user service functions:
+### Task 8.2: User Service Implementation ✅
+- [x] Implement complete user service functions:
   - `get_user_by_subject()` with role aggregation
   - `get_user_roles()` from both group_roles and user_roles
   - `get_user_groups()` from memberships
