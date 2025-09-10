@@ -249,20 +249,20 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
 
 ## 👤 Phase 10: Membership Management API
 
-### Task 10.1: Implement Membership Endpoints
-- [ ] Create `app/routers/memberships.py` with endpoints from SPEC.md Section 3.3:
+### Task 10.1: Implement Membership Endpoints ✅
+- [x] Create `app/routers/memberships.py` with endpoints from SPEC.md Section 3.3:
   - `POST /groups/{groupName}/members` - add member with full flow
   - `DELETE /groups/{groupName}/members/{subject}` - remove member
-- [ ] Implement complete add member flow as detailed in SPEC.md Section 5.1:
+- [x] Implement complete add member flow as detailed in SPEC.md Section 5.1:
   1. Caller authentication and user creation
   2. Cerbos permission check for group:add_member
   3. Database transaction with membership insertion
   4. Automatic Cerbos policy push
   5. Audit logging
-- [ ] Ensure idempotent operations with proper conflict handling
+- [x] Ensure idempotent operations with proper conflict handling
 
-### Task 10.2: Membership Service Implementation
-- [ ] Implement membership service functions:
+### Task 10.2: Membership Service Implementation ✅
+- [x] Implement membership service functions:
   - `add_member_to_group()` with complete transaction and policy management
   - `remove_member_from_group()` with policy updates
   - Proper role aggregation after membership changes

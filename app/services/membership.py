@@ -108,10 +108,27 @@ class MembershipService(BaseService):
 
                 # Step 3: Update Cerbos policies
                 with self.tracer.start_span("update_cerbos_policies") as policy_span:
-                    # This would trigger policy regeneration for the user
-                    # Implementation details depend on the specific policy structure
-                    policy_span.set_attribute("cerbos.policy_update_triggered", True)
-                    # TODO: Implement actual policy push in later phases
+                    try:
+                        # Get user's updated roles after membership addition
+                        user_roles = self._get_user_roles_after_membership_change(db, user)
+
+                        # Push updated policy to Cerbos
+                        policy_pushed = self.cerbos_service.push_user_policy(
+                            user_subject=member_subject,
+                            user_roles=user_roles
+                        )
+
+                        policy_span.set_attribute("cerbos.policy_pushed", policy_pushed)
+                        policy_span.set_attribute("cerbos.user_roles_count", len(user_roles))
+
+                        if not policy_pushed:
+                            # Policy push failed, but we don't rollback the membership
+                            # This will be handled by reconciliation tasks
+                            policy_span.set_attribute("cerbos.policy_push_failed", True)
+
+                    except Exception as e:
+                        policy_span.record_exception(e)
+                        policy_span.set_attribute("cerbos.policy_error", str(e))
 
                 span.set_attribute("membership.success", True)
                 return True
@@ -171,8 +188,30 @@ class MembershipService(BaseService):
                     span.set_attribute("membership.not_found", True)
                     return True  # Idempotent operation
 
+                # Get user for policy update
+                user = membership.user
+
                 db.delete(membership)
                 db.commit()
+
+                # Update Cerbos policies after membership removal
+                try:
+                    user_roles = self._get_user_roles_after_membership_change(db, user)
+
+                    # Push updated policy to Cerbos (or delete if no roles left)
+                    if user_roles:
+                        self.cerbos_service.push_user_policy(
+                            user_subject=member_subject,
+                            user_roles=user_roles
+                        )
+                    else:
+                        # User has no roles left, delete their policy
+                        self.cerbos_service.delete_user_policy(member_subject)
+
+                except Exception as e:
+                    # Policy update failed, but membership was removed
+                    span.record_exception(e)
+                    span.set_attribute("cerbos.policy_update_failed", True)
 
                 span.set_attribute("membership.removed", True)
                 return True
@@ -183,3 +222,21 @@ class MembershipService(BaseService):
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
                 raise
+
+    def _get_user_roles_after_membership_change(self, db: Session, user: User) -> list[str]:
+        """Get user's roles after membership changes for policy updates."""
+        roles = set()
+
+        # Refresh user from database to get latest memberships
+        db.refresh(user)
+
+        # Get roles from group memberships
+        for membership in user.memberships:
+            for group_role in membership.group.group_roles:
+                roles.add(group_role.role.name)
+
+        # Get direct user roles
+        for user_role in user.user_roles:
+            roles.add(user_role.role.name)
+
+        return list(roles)

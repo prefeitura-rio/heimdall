@@ -14,7 +14,7 @@ from opentelemetry import trace
 
 from app.database import engine, get_db
 from app.dependencies import get_current_user_with_roles
-from app.routers import groups, users
+from app.routers import groups, memberships, users
 from app.tracing import instrument_fastapi, instrument_sqlalchemy, setup_tracing
 
 # Initialize OpenTelemetry tracing before creating the FastAPI app
@@ -183,10 +183,10 @@ async def root():
 # Router registration
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
+app.include_router(memberships.router, prefix="/api/v1", tags=["memberships"])
 
 # TODO: Additional routers will be added as API endpoints are implemented
-# from app.routers import memberships, roles, mappings
-# app.include_router(memberships.router, prefix="/api/v1", tags=["memberships"])
+# from app.routers import roles, mappings
 # app.include_router(roles.router, prefix="/api/v1/roles", tags=["roles"])
 # app.include_router(mappings.router, prefix="/api/v1/mappings", tags=["mappings"])
 
