@@ -17,6 +17,7 @@ processors:
 
   memory_limiter:
     limit_mib: 512
+    check_interval: 1s
 
   resource:
     attributes:
@@ -25,12 +26,6 @@ processors:
         action: insert
 
 exporters:
-  # Export to Jaeger for visualization
-  jaeger:
-    endpoint: jaeger:14250
-    tls:
-      insecure: true
-
   # Export to console for debugging
   logging:
     loglevel: info
@@ -50,7 +45,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [jaeger, logging]
+      exporters: [logging]
 
     metrics:
       receivers: [otlp]

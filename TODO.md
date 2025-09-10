@@ -95,8 +95,8 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
 
 ## 🗄️ Phase 3: Database Layer Implementation
 
-### Task 3.1: Create SQLAlchemy Models
-- [ ] Implement all tables from SPEC.md Section 2 in `app/models/`:
+### Task 3.1: Create SQLAlchemy Models ✅
+- [x] Implement all tables from SPEC.md Section 2 in `app/models/`:
   - `actions` table model
   - `endpoints` table model  
   - `roles` table model
@@ -107,93 +107,94 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - `user_roles` table model
   - `group_management_rights` table model
   - `admin_audit` table model
-- [ ] Ensure all foreign key relationships are correctly defined
-- [ ] Add proper indexes as mentioned in SPEC.md Section 2 Notes
-- [ ] Follow PostgreSQL DDL exactly as specified
+- [x] Ensure all foreign key relationships are correctly defined
+- [x] Add proper indexes as mentioned in SPEC.md Section 2 Notes
+- [x] Follow PostgreSQL DDL exactly as specified
 
-### Task 3.2: Setup Alembic Migrations
-- [ ] Initialize Alembic: `alembic init migrations`
-- [ ] Configure `alembic.ini` to use environment variables for database URL
-- [ ] Create initial migration with all tables: `alembic revision --autogenerate -m "Initial tables"`
-- [ ] Test migration works: `alembic upgrade head`
-- [ ] Verify all tables created correctly in PostgreSQL
+### Task 3.2: Setup Alembic Migrations ✅
+- [x] Initialize Alembic: `alembic init migrations`
+- [x] Configure `alembic.ini` to use environment variables for database URL
+- [x] Create initial migration with all tables: `alembic revision --autogenerate -m "Initial tables"`
+- [x] Test migration works: `alembic upgrade head`
+- [x] Verify all tables created correctly in PostgreSQL
 
-### Task 3.3: Create Database Connection Layer
-- [ ] Implement `app/database.py` with:
+### Task 3.3: Create Database Connection Layer ✅
+- [x] Implement `app/database.py` with:
   - SQLAlchemy engine configuration from environment variables
   - Session management with proper async support
   - Connection testing utilities
   - Error handling for database failures
-- [ ] Follow environment configuration from SPEC.md Section 4
-- [ ] Implement `get_db_session()` function for dependency injection
+- [x] Follow environment configuration from SPEC.md Section 4
+- [x] Implement `get_db_session()` function for dependency injection
 
 ## 📡 Phase 4: OpenTelemetry Tracing Setup
 
-### Task 4.1: Configure OpenTelemetry
-- [ ] Implement OpenTelemetry setup exactly as shown in SPEC.md Section 7
-- [ ] Configure gRPC OTLP exporter using `OTEL_EXPORTER_OTLP_ENDPOINT`
-- [ ] Set up FastAPI instrumentation for automatic HTTP tracing
-- [ ] Set up SQLAlchemy instrumentation for database query tracing
-- [ ] Configure trace context propagation
+### Task 4.1: Configure OpenTelemetry ✅
+- [x] Implement OpenTelemetry setup exactly as shown in SPEC.md Section 6
+- [x] Configure gRPC OTLP exporter using `OTEL_EXPORTER_OTLP_ENDPOINT`
+- [x] Set up FastAPI instrumentation for automatic HTTP tracing
+- [x] Set up SQLAlchemy instrumentation for database query tracing
+- [x] Configure trace context propagation
 
-### Task 4.2: Add Custom Spans for Business Logic
-- [ ] Add tracing spans for all Cerbos API calls
-- [ ] Add tracing spans for membership operations
-- [ ] Add tracing spans for policy management
-- [ ] Add tracing spans for authentication operations
-- [ ] Ensure trace_id and span_id are included in structured logging
+### Task 4.2: Add Custom Spans for Business Logic ✅
+- [x] Add tracing spans for all Cerbos API calls
+- [x] Add tracing spans for membership operations
+- [x] Add tracing spans for policy management
+- [x] Add tracing spans for authentication operations
+- [x] Ensure trace_id and span_id are included in structured logging
 
 ## 🔐 Phase 5: Authentication System
 
-### Task 5.1: Implement JWT Verification
-- [ ] Create JWT verification service in `app/services/auth.py`:
+### Task 5.1: Implement JWT Verification ✅
+- [x] Create JWT verification service in `app/services/auth.py`:
   - Fetch and cache Keycloak JWKS from `KEYCLOAK_JWKS_URL`
   - Verify JWT signature, expiration, audience, issuer
   - Extract user subject and claims
   - Handle token refresh and JWKS rotation
-- [ ] Follow JWT configuration from SPEC.md Section 4
-- [ ] Implement proper error handling for invalid tokens
+- [x] Follow JWT configuration from SPEC.md Section 4
+- [x] Implement proper error handling for invalid tokens
 
-### Task 5.2: Implement Auto-User Creation
-- [ ] Create user service in `app/services/user.py`:
+### Task 5.2: Implement Auto-User Creation ✅
+- [x] Create user service in `app/services/user.py`:
   - Auto-create user record on first JWT access (as specified in SPEC.md Section 3.1)
   - Upsert logic for user records
-  - Extract display_name from JWT claims when available
-- [ ] Integrate with authentication dependency
-- [ ] Ensure idempotent user creation
+  - Use JWT 'preferred_username' field (CPF) as user subject/identifier
+  - Extract display_name from JWT 'name' field for display purposes
+- [x] Integrate with authentication dependency
+- [x] Ensure idempotent user creation
 
-### Task 5.3: Implement Static API Token Authentication
-- [ ] Add static API token verification using `STATIC_API_TOKEN` environment variable
-- [ ] Create authentication dependency that accepts both JWT and static token
-- [ ] Implement token type detection and appropriate handling
-- [ ] Apply to mapping endpoints as specified in SPEC.md Section 3.5
+### Task 5.3: Implement Static API Token Authentication ✅
+- [x] Add static API token verification using `STATIC_API_TOKEN` environment variable
+- [x] Create authentication dependency that accepts both JWT and static token
+- [x] Implement token type detection and appropriate handling
+- [x] Apply to mapping endpoints as specified in SPEC.md Section 3.5
 
 ## 🎯 Phase 6: Cerbos Integration
 
-### Task 6.1: Create Cerbos Client Service
-- [ ] Implement `app/services/cerbos.py` with:
+### Task 6.1: Create Cerbos Client Service ✅
+- [x] Implement `app/services/cerbos.py` with:
   - Cerbos Check API client using `CERBOS_CHECK_URL`
   - Cerbos Admin API client using `CERBOS_ADMIN_URL` and credentials
   - Request payload builders as shown in SPEC.md Section 4.1
   - Response parsing and error handling
   - Retry logic with exponential backoff for failed calls
 
-### Task 6.2: Implement Permission Checking
-- [ ] Create permission checking functions for all admin operations:
+### Task 6.2: Implement Permission Checking ✅
+- [x] Create permission checking functions for all admin operations:
   - `group:create`, `group:delete`, `group:add_member`, `group:remove_member`
   - `group:assign_role`, `group:remove_role`
   - `mapping:create`, `mapping:update`, `mapping:delete`
-- [ ] Follow Cerbos Check examples from SPEC.md Section 4.1
-- [ ] Implement proper role aggregation from database for principal.roles
+- [x] Follow Cerbos Check examples from SPEC.md Section 4.1
+- [x] Implement proper role aggregation from database for principal.roles
 
-### Task 6.3: Implement Transparent Policy Management
-- [ ] Create policy management functions that:
+### Task 6.3: Implement Transparent Policy Management ✅
+- [x] Create policy management functions that:
   - Build principal policies from user roles (group_roles + user_roles)
   - Push policies to Cerbos Admin API automatically on membership changes
   - Handle policy updates transparently (users never see policy formats)
   - Implement retry logic for failed policy pushes
-- [ ] Follow policy examples from SPEC.md Section 4.2
-- [ ] Ensure policy management is completely transparent to API users
+- [x] Follow policy examples from SPEC.md Section 4.2
+- [x] Ensure policy management is completely transparent to API users
 
 ## 🛣️ Phase 7: FastAPI Application Structure
 
@@ -301,7 +302,20 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - `create_mapping()` with owner_group permission checking
   - `update_mapping()` and `delete_mapping()` with proper authorization
   - Efficient pattern matching algorithm for path resolution
-  - Caching considerations for frequently accessed mappings
+  - Integration with Redis caching layer
+
+### Task 12.3: Redis Caching Integration
+- [ ] Add Redis to docker-compose.yml with appropriate configuration
+- [ ] Add redis dependency to pyproject.toml
+- [ ] Create Redis cache service in `app/services/cache.py`:
+  - Redis connection with connection pooling
+  - Cache key utilities and TTL management
+  - Error handling and fallback to database
+- [ ] Implement mapping resolution caching:
+  - Cache GET /mappings results with 60s TTL
+  - Cache invalidation on mapping CRUD operations
+  - Tracing integration for cache hits/misses
+- [ ] Add cache monitoring and metrics via OpenTelemetry
 
 ## 📋 Phase 13: Audit System
 
@@ -422,12 +436,23 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - Use query batching where appropriate
   - Monitor and log slow queries
 
-### Task 19.2: Caching Strategy
-- [ ] Implement caching for:
-  - Keycloak JWKS (with TTL and refresh)
-  - User role aggregations (short TTL)
-  - Mapping resolutions (adapter-side as specified in SPEC.md)
-  - Cerbos permission check results (very short TTL)
+### Task 19.2: Redis Caching Implementation
+- [ ] Set up Redis service in docker-compose.yml
+- [ ] Add redis dependency to pyproject.toml
+- [ ] Create Redis connection layer in `app/cache.py`:
+  - Redis client configuration with connection pooling
+  - Cache key management and TTL utilities
+  - Error handling for Redis failures
+- [ ] Implement server-side caching for:
+  - **Mapping resolution cache**: Cache GET /mappings results (60s TTL)
+  - **User role aggregation cache**: Cache user roles from DB queries (30s TTL)
+  - **Keycloak JWKS cache**: Cache JWKS keys (300s TTL) with refresh
+  - **Cerbos permission cache**: Cache permission check results (10s TTL)
+- [ ] Add cache invalidation logic:
+  - Invalidate mapping cache on mapping create/update/delete
+  - Invalidate user role cache on membership/role changes
+  - Manual cache clearing endpoint for debugging
+- [ ] Add caching metrics and monitoring via OpenTelemetry
 
 ## ✅ Phase 20: Final Validation and Deployment Preparation
 

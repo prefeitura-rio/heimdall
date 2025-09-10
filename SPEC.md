@@ -86,8 +86,8 @@ CREATE TABLE group_roles (
 -- users (Keycloak subject storage)
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  subject TEXT UNIQUE NOT NULL,   -- Keycloak 'sub' or username
-  display_name TEXT,
+  subject TEXT UNIQUE NOT NULL,   -- User CPF from JWT 'preferred_username' field
+  display_name TEXT,              -- Extracted from JWT 'name' field
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
@@ -165,7 +165,7 @@ The Admin Service verifies the JWT, automatically creates user entries, and call
 
 ### 3.1 User endpoints
 
-**Note:** Users are automatically created when they access any endpoint with a valid JWT. No manual import is needed.
+**Note:** Users are automatically created when they access any endpoint with a valid JWT. No manual import is needed. The user's subject (CPF) is extracted from the JWT `preferred_username` field, and display_name from the `name` field.
 
 #### GET /users/{subject}
 
@@ -431,6 +431,17 @@ Admin Service protects this endpoint with JWT or static API token. Adapter must 
 
 ### Caching
 
+**Admin Service Server-Side Caching (Redis)**
+
+Admin Service implements Redis caching for high-performance mapping resolution:
+
+- **Mapping resolution cache**: Cache mapping lookup results with TTL (60s)
+- **User role aggregation cache**: Cache user roles from database queries with TTL (30s)  
+- **Keycloak JWKS cache**: Cache JWKS keys with TTL (300s) and automatic refresh
+- **Cache invalidation**: Automatic cache invalidation on mapping/membership changes
+
+**Adapter Client-Side Caching**
+
 Adapter caches mapping resolution locally for TTL (e.g., 30s). Cache key: (method, path) or pattern match result (cache by mapping_id).
 
 On mapping update, Admin Service can optionally POST an invalidation to a webhook URL configured for adapters (optional). If not implemented, adapter uses TTL.
@@ -448,6 +459,12 @@ All configuration is done through environment variables:
 ```bash
 # PostgreSQL Database (shared by both containers)
 DB_DSN=postgresql://user:pass@postgres:5432/heimdall
+
+# Redis Cache (shared by both containers)
+REDIS_URL=redis://redis:6379/0
+REDIS_MAPPING_TTL=60  # seconds
+REDIS_USER_ROLES_TTL=30  # seconds  
+REDIS_JWKS_TTL=300  # seconds
 
 # Cerbos
 CERBOS_CHECK_URL=http://cerbos:3593/api/check/resources
