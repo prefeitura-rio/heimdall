@@ -4,7 +4,6 @@ Implements reconciliation and sync retry tasks using APScheduler.
 """
 
 import asyncio
-import logging
 import os
 import signal
 import sys
@@ -16,6 +15,7 @@ from opentelemetry import trace
 
 from app.config import validate_environment
 from app.database import get_db_session
+from app.logging_config import get_structured_logger, setup_structured_logging
 from app.models import User
 from app.services.audit import AuditService
 from app.services.base import BaseService
@@ -23,11 +23,9 @@ from app.services.cerbos import CerbosService
 from app.services.user import UserService
 from app.tracing import setup_tracing
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+setup_structured_logging()
+logger = get_structured_logger(__name__)
 
 
 class BackgroundTaskService(BaseService):
@@ -61,7 +59,11 @@ class BackgroundTaskService(BaseService):
             {"task.type": "reconciliation", "task.scheduled": True},
         ) as span:
             try:
-                logger.info("Starting Cerbos policy reconciliation")
+                logger.log_operation(
+                    level=20,  # INFO
+                    message="Starting Cerbos policy reconciliation",
+                    operation="reconcile_start",
+                )
 
                 # Get database session
                 session = next(get_db_session())
@@ -89,8 +91,11 @@ class BackgroundTaskService(BaseService):
                                     users_updated += 1
                                 else:
                                     users_failed += 1
-                                    logger.warning(
-                                        f"Failed to update policy for user {user.subject}"
+                                    logger.log_operation(
+                                        level=30,  # WARNING
+                                        message="Failed to update policy for user",
+                                        operation="reconcile_policy_update_failed",
+                                        extra_fields={"user_subject": user.subject},
                                     )
                             else:
                                 # User has no roles, delete their policy if it exists
@@ -101,7 +106,16 @@ class BackgroundTaskService(BaseService):
 
                         except Exception as e:
                             users_failed += 1
-                            logger.error(f"Error processing user {user.subject}: {e}")
+                            logger.log_operation(
+                                level=50,  # ERROR
+                                message="Error processing user during reconciliation",
+                                operation="reconcile_user_error",
+                                extra_fields={
+                                    "user_subject": user.subject,
+                                    "error": str(e),
+                                    "exception_type": type(e).__name__,
+                                },
+                            )
                             span.record_exception(e)
 
                     # Log reconciliation results
@@ -128,9 +142,15 @@ class BackgroundTaskService(BaseService):
                         success=users_failed == 0,
                     )
 
-                    logger.info(
-                        f"Reconciliation completed: {users_processed} users processed, "
-                        f"{users_updated} updated, {users_failed} failed"
+                    logger.log_operation(
+                        level=20,  # INFO
+                        message="Reconciliation completed",
+                        operation="reconcile_complete",
+                        extra_fields={
+                            "users_processed": users_processed,
+                            "users_updated": users_updated,
+                            "users_failed": users_failed,
+                        },
                     )
 
                 finally:
@@ -140,7 +160,12 @@ class BackgroundTaskService(BaseService):
                 span.record_exception(e)
                 span.set_attribute("reconciliation.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-                logger.error(f"Reconciliation failed: {e}")
+                logger.log_operation(
+                    level=50,  # ERROR
+                    message="Reconciliation failed",
+                    operation="reconcile_failed",
+                    extra_fields={"error": str(e), "exception_type": type(e).__name__},
+                )
 
     async def retry_failed_syncs(self) -> None:
         """
@@ -151,7 +176,11 @@ class BackgroundTaskService(BaseService):
             "retry_failed_syncs", {"task.type": "sync_retry", "task.scheduled": True}
         ) as span:
             try:
-                logger.info("Starting failed sync retry")
+                logger.log_operation(
+                    level=20,  # INFO
+                    message="Starting failed sync retry",
+                    operation="sync_retry_start",
+                )
 
                 # Get database session
                 session = next(get_db_session())
@@ -184,7 +213,12 @@ class BackgroundTaskService(BaseService):
                         success=True,
                     )
 
-                    logger.info("Sync retry completed: no failed operations found")
+                    logger.log_operation(
+                        level=20,  # INFO
+                        message="Sync retry completed: no failed operations found",
+                        operation="sync_retry_complete",
+                        extra_fields={"failed_operations_found": 0},
+                    )
 
                 finally:
                     session.close()
@@ -193,11 +227,20 @@ class BackgroundTaskService(BaseService):
                 span.record_exception(e)
                 span.set_attribute("sync_retry.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-                logger.error(f"Sync retry failed: {e}")
+                logger.log_operation(
+                    level=50,  # ERROR
+                    message="Sync retry failed",
+                    operation="sync_retry_failed",
+                    extra_fields={"error": str(e), "exception_type": type(e).__name__},
+                )
 
     def setup_scheduler(self) -> None:
         """Setup APScheduler with reconciliation and sync retry tasks."""
-        logger.info("Setting up background task scheduler")
+        logger.log_operation(
+            level=20,  # INFO
+            message="Setting up background task scheduler",
+            operation="scheduler_setup",
+        )
 
         # Add reconciliation task
         self.scheduler.add_job(
@@ -219,28 +262,49 @@ class BackgroundTaskService(BaseService):
             max_instances=1,  # Ensure only one instance runs at a time
         )
 
-        logger.info(
-            f"Scheduled reconciliation task every {self.reconcile_interval} seconds"
-        )
-        logger.info(
-            f"Scheduled sync retry task every {self.sync_retry_interval} seconds"
+        logger.log_operation(
+            level=20,  # INFO
+            message="Background tasks scheduled successfully",
+            operation="scheduler_ready",
+            extra_fields={
+                "reconcile_interval_seconds": self.reconcile_interval,
+                "sync_retry_interval_seconds": self.sync_retry_interval,
+            },
         )
 
     def signal_handler(self, signum: int, _frame: Any) -> None:
         """Handle shutdown signals gracefully."""
-        logger.info(f"Received signal {signum}, initiating graceful shutdown")
+        logger.log_operation(
+            level=20,  # INFO
+            message="Received shutdown signal, initiating graceful shutdown",
+            operation="shutdown_signal",
+            extra_fields={"signal_number": signum},
+        )
         self.shutdown_requested = True
 
     async def run(self) -> None:
         """Main entry point for background tasks."""
-        logger.info("Starting Heimdall background tasks service")
+        logger.log_operation(
+            level=20,  # INFO
+            message="Starting Heimdall background tasks service",
+            operation="service_start",
+        )
 
         # Validate environment configuration
         try:
             validate_environment()
-            logger.info("Environment configuration validation successful")
+            logger.log_operation(
+                level=20,  # INFO
+                message="Environment configuration validation successful",
+                operation="config_validation",
+            )
         except Exception as e:
-            logger.error(f"Environment configuration validation failed: {e}")
+            logger.log_operation(
+                level=50,  # ERROR
+                message="Environment configuration validation failed",
+                operation="config_validation",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
             sys.exit(1)
 
         # Setup signal handlers for graceful shutdown
@@ -252,20 +316,37 @@ class BackgroundTaskService(BaseService):
             self.setup_scheduler()
             self.scheduler.start()
 
-            logger.info("Background tasks service started successfully")
+            logger.log_operation(
+                level=20,  # INFO
+                message="Background tasks service started successfully",
+                operation="service_ready",
+            )
 
             # Keep running until shutdown is requested
             while not self.shutdown_requested:
                 await asyncio.sleep(1)
 
         except Exception as e:
-            logger.error(f"Background tasks service failed: {e}")
+            logger.log_operation(
+                level=50,  # ERROR
+                message="Background tasks service failed",
+                operation="service_error",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
             sys.exit(1)
 
         finally:
-            logger.info("Shutting down background tasks service")
+            logger.log_operation(
+                level=20,  # INFO
+                message="Shutting down background tasks service",
+                operation="service_shutdown",
+            )
             self.scheduler.shutdown()
-            logger.info("Background tasks service stopped")
+            logger.log_operation(
+                level=20,  # INFO
+                message="Background tasks service stopped",
+                operation="service_stopped",
+            )
 
 
 async def main() -> None:
@@ -274,10 +355,18 @@ async def main() -> None:
     tracing_enabled = setup_tracing()
 
     if tracing_enabled:
-        logger.info("OpenTelemetry tracing enabled for background tasks")
+        logger.log_operation(
+            level=20,  # INFO
+            message="OpenTelemetry tracing enabled for background tasks",
+            operation="tracing_setup",
+            extra_fields={"tracing_enabled": True},
+        )
     else:
-        logger.info(
-            "OpenTelemetry tracing disabled - OTEL_EXPORTER_OTLP_ENDPOINT not set"
+        logger.log_operation(
+            level=20,  # INFO
+            message="OpenTelemetry tracing disabled - OTEL_EXPORTER_OTLP_ENDPOINT not set",
+            operation="tracing_setup",
+            extra_fields={"tracing_enabled": False},
         )
 
     service = BackgroundTaskService()

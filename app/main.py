@@ -240,7 +240,12 @@ async def readiness_check(db=Depends(get_db)):
             span.record_exception(e)
             span.set_attribute("db.connection", "failed")
 
-            logger.error("Database connection failed in readiness check", exc_info=True)
+            logger.log_operation(
+                level=50,  # ERROR
+                message="Database connection failed in readiness check",
+                operation="readiness_check",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Database connection failed",
