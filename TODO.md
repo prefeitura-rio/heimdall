@@ -232,16 +232,16 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
 
 ## 🏘️ Phase 9: Group Management API
 
-### Task 9.1: Implement Group Endpoints
-- [ ] Create `app/routers/groups.py` with all endpoints from SPEC.md Section 3.2:
+### Task 9.1: Implement Group Endpoints ✅
+- [x] Create `app/routers/groups.py` with all endpoints from SPEC.md Section 3.2:
   - `POST /groups` - create group with Cerbos permission check
   - `GET /groups` - list groups with optional prefix filtering
   - `DELETE /groups/{groupName}` - delete group with cleanup
-- [ ] Implement proper request/response models with Pydantic
-- [ ] Add comprehensive error handling and validation
+- [x] Implement proper request/response models with Pydantic
+- [x] Add comprehensive error handling and validation
 
-### Task 9.2: Group Service Implementation
-- [ ] Implement group service functions:
+### Task 9.2: Group Service Implementation ✅
+- [x] Implement group service functions:
   - `create_group()` with Cerbos permission checking
   - `delete_group()` with cascading cleanup of memberships and roles
   - `list_groups()` with filtering support
