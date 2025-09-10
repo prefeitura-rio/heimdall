@@ -19,7 +19,7 @@ load_dotenv()
 from app.config import validate_environment  # noqa: E402
 from app.database import engine
 from app.logging_config import get_structured_logger, setup_structured_logging
-from app.routers import groups, health, mappings, memberships, roles, users
+from app.routers import actions, groups, health, mappings, memberships, roles, users
 from app.services.database_monitor import setup_database_monitoring
 from app.tracing import instrument_fastapi, instrument_sqlalchemy, setup_tracing
 
@@ -222,4 +222,5 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
 app.include_router(memberships.router, prefix="/api/v1", tags=["memberships"])
 app.include_router(roles.router, prefix="/api/v1/roles", tags=["roles"])
+app.include_router(actions.router, prefix="/api/v1/actions", tags=["actions"])
 app.include_router(mappings.router, prefix="/api/v1/mappings", tags=["mappings"])
