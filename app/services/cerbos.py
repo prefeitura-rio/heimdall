@@ -67,7 +67,11 @@ class CerbosService(BaseService):
             },
             "resources": [
                 {
-                    "resource": {"id": resource_type, "attr": resource_attrs},
+                    "resource": {
+                        "kind": resource_type,
+                        "id": resource_type,
+                        "attr": resource_attrs
+                    },
                     "actions": [action],
                 }
             ],
