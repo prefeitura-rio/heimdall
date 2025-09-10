@@ -271,15 +271,15 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
 
 ## 🎭 Phase 11: Role Management API
 
-### Task 11.1: Implement Role Endpoints
-- [ ] Create `app/routers/roles.py` with endpoints from SPEC.md Section 3.4:
+### Task 11.1: Implement Role Endpoints ✅
+- [x] Create `app/routers/roles.py` with endpoints from SPEC.md Section 3.4:
   - `POST /roles` - create role (admin-only)
   - `GET /roles` - list all roles
   - `POST /groups/{groupName}/roles` - assign role to group
   - `DELETE /groups/{groupName}/roles/{roleName}` - remove role from group
 
-### Task 11.2: Role Service Implementation
-- [ ] Implement role service functions:
+### Task 11.2: Role Service Implementation ✅
+- [x] Implement role service functions:
   - `create_role()` with proper validation
   - `assign_role_to_group()` with member policy updates
   - `remove_role_from_group()` with policy cleanup
@@ -287,24 +287,34 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
 
 ## 🗺️ Phase 12: Mapping Management API
 
-### Task 12.1: Implement Mapping Endpoints
-- [ ] Create `app/routers/mappings.py` with endpoints from SPEC.md Section 3.5:
+### Task 12.1: Implement Mapping Endpoints ✅
+- [x] Create `app/routers/mappings.py` with endpoints from SPEC.md Section 3.5:
   - `GET /mappings?path=/example&method=POST` - resolve path/method to action
   - `POST /mappings` - create new mapping
   - `PUT /mappings/{id}` - update existing mapping
   - `DELETE /mappings/{id}` - delete mapping
-- [ ] Implement regex pattern matching for `path_pattern` as specified in SPEC.md Section 2
-- [ ] Support for method matching including 'ANY' wildcard
+  - `GET /mappings/list` - list all mappings with filtering
+- [x] Implement regex pattern matching for `path_pattern` as specified in SPEC.md Section 2
+- [x] Support for method matching including 'ANY' wildcard
 
-### Task 12.2: Mapping Service Implementation
-- [ ] Implement mapping service functions:
+### Task 12.2: Mapping Service Implementation ✅
+- [x] Implement mapping service functions:
   - `resolve_mapping()` with regex pattern matching
-  - `create_mapping()` with owner_group permission checking
+  - `create_mapping()` with permission checking via Cerbos
   - `update_mapping()` and `delete_mapping()` with proper authorization
   - Efficient pattern matching algorithm for path resolution
-  - Integration with Redis caching layer
+  - Support for wildcards (*,**) and named parameters (:id)
 
-### Task 12.3: Redis Caching Integration
+### Task 12.3: Automatic Superadmin Role Assignment ✅
+- [x] Implement automatic role assignment for users with Keycloak client role 'heimdall-admin'
+- [x] Extract roles from JWT `resource_access.<client_id>.roles` field
+- [x] Auto-create and assign 'superadmin' role based on JWT content
+- [x] Support role removal when user loses heimdall-admin role
+- [x] Add `KEYCLOAK_CLIENT_ID` environment variable configuration
+- [x] Update SPEC.md to document automatic role assignment feature
+- [x] Include comprehensive error handling and OpenTelemetry tracing
+
+### Task 12.4: Redis Caching Integration
 - [ ] Add Redis to docker-compose.yml with appropriate configuration
 - [ ] Add redis dependency to pyproject.toml
 - [ ] Create Redis cache service in `app/services/cache.py`:
