@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Group, Membership, User
 from app.services.base import BaseService
+from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
 
 
@@ -17,6 +18,7 @@ class MembershipService(BaseService):
     def __init__(self):
         super().__init__("membership")
         self.cerbos_service = CerbosService()
+        self.cache_service = CacheService()
 
     def add_member_to_group(
         self,
@@ -101,6 +103,10 @@ class MembershipService(BaseService):
                     )
                     db.add(membership)
                     db.commit()
+
+                    # Invalidate user roles cache after membership change
+                    self.cache_service.invalidate_user_roles_cache(member_subject)
+                    db_span.set_attribute("membership.cache_invalidated", True)
 
                     db_span.set_attribute("membership.created", True)
                     db_span.set_attribute("membership.group_id", group.id)
@@ -193,6 +199,10 @@ class MembershipService(BaseService):
 
                 db.delete(membership)
                 db.commit()
+
+                # Invalidate user roles cache after membership removal
+                self.cache_service.invalidate_user_roles_cache(member_subject)
+                span.set_attribute("membership.cache_invalidated", True)
 
                 # Update Cerbos policies after membership removal
                 try:

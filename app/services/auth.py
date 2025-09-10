@@ -4,7 +4,6 @@ Implements JWT verification and user management with distributed tracing.
 """
 
 import os
-import time
 from typing import Any
 
 import requests
@@ -12,6 +11,7 @@ from jose import JWTError, jwk, jwt
 from opentelemetry import trace
 
 from app.services.base import BaseService
+from app.services.cache import CacheService
 
 
 class AuthService(BaseService):
@@ -23,36 +23,45 @@ class AuthService(BaseService):
         self.jwt_algorithm = os.getenv("JWT_ALGORITHM", "RS256")
         self.jwt_audience = os.getenv("JWT_AUDIENCE")
         self.static_api_token = os.getenv("STATIC_API_TOKEN")
-        self._jwks_cache = {}
-        self._jwks_cache_time = 0
-        self._jwks_cache_ttl = 300  # 5 minutes
+        self.cache_service = CacheService()
 
     def _fetch_jwks(self) -> dict[str, Any]:
-        """Fetch JWKS from Keycloak with caching."""
-        current_time = time.time()
+        """Fetch JWKS from Keycloak with Redis caching."""
+        with self.trace_operation(
+            "fetch_jwks", {"auth.jwks_url": self.jwks_url}
+        ) as span:
+            try:
+                if not self.jwks_url:
+                    raise ValueError("KEYCLOAK_JWKS_URL not configured")
 
-        # Check if cache is still valid
-        if (
-            self._jwks_cache
-            and current_time - self._jwks_cache_time < self._jwks_cache_ttl
-        ):
-            return self._jwks_cache
+                # Try to get from cache first
+                cached_jwks = self.cache_service.get_jwks_cache(self.jwks_url)
+                if cached_jwks:
+                    span.set_attribute("auth.jwks_cache_hit", True)
+                    span.set_attribute("auth.jwks_keys_count", len(cached_jwks.get("keys", [])))
+                    return cached_jwks
 
-        if not self.jwks_url:
-            raise ValueError("KEYCLOAK_JWKS_URL not configured")
+                span.set_attribute("auth.jwks_cache_hit", False)
 
-        try:
-            response = requests.get(self.jwks_url, timeout=10)
-            response.raise_for_status()
-            jwks_data = response.json()
+                # Fetch from Keycloak
+                response = requests.get(self.jwks_url, timeout=10)
+                response.raise_for_status()
+                jwks_data = response.json()
 
-            # Cache the JWKS
-            self._jwks_cache = jwks_data
-            self._jwks_cache_time = current_time
+                # Cache the result
+                self.cache_service.set_jwks_cache(self.jwks_url, jwks_data)
+                span.set_attribute("auth.jwks_cached", True)
 
-            return jwks_data
-        except requests.RequestException as e:
-            raise ValueError(f"Failed to fetch JWKS: {e}")
+                span.set_attribute("auth.jwks_fetched", True)
+                span.set_attribute("auth.jwks_keys_count", len(jwks_data.get("keys", [])))
+
+                return jwks_data
+
+            except requests.RequestException as e:
+                span.record_exception(e)
+                span.set_attribute("auth.jwks_fetch_error", str(e))
+                span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                raise ValueError(f"Failed to fetch JWKS: {e}") from e
 
     def _get_signing_key(self, token: str) -> str:
         """Get the signing key for JWT verification."""

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Group, GroupRole, Role, User
 from app.services.base import BaseService
+from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
 
 
@@ -17,6 +18,7 @@ class RoleService(BaseService):
     def __init__(self):
         super().__init__("role")
         self.cerbos_service = CerbosService()
+        self.cache_service = CacheService()
 
     def create_role(self, db: Session, name: str, description: str, created_by: User) -> Role:
         """
@@ -129,6 +131,11 @@ class RoleService(BaseService):
                 # Update policies for all group members
                 self._update_member_policies_after_role_change(db, group, span)
 
+                # Invalidate user roles cache for all group members
+                for membership in group.memberships:
+                    self.cache_service.invalidate_user_roles_cache(membership.user.subject)
+                span.set_attribute("role.cache_invalidated_members", len(group.memberships))
+
                 return True
 
             except Exception as e:
@@ -175,6 +182,11 @@ class RoleService(BaseService):
 
                 # Update policies for all group members
                 self._update_member_policies_after_role_change(db, group, span)
+
+                # Invalidate user roles cache for all group members
+                for membership in group.memberships:
+                    self.cache_service.invalidate_user_roles_cache(membership.user.subject)
+                span.set_attribute("role.cache_invalidated_members", len(group.memberships))
 
                 return True
 

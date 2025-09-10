@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Action, Endpoint, User
 from app.services.base import BaseService
+from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
 
 
@@ -20,10 +21,11 @@ class MappingService(BaseService):
     def __init__(self):
         super().__init__("mapping")
         self.cerbos_service = CerbosService()
+        self.cache_service = CacheService()
 
     def resolve_mapping(self, db: Session, path: str, method: str) -> dict[str, Any] | None:
         """
-        Resolve path and method to action using regex pattern matching.
+        Resolve path and method to action using regex pattern matching with Redis caching.
         Returns mapping information for adapter usage.
         """
         with self.trace_operation("resolve_mapping", {
@@ -32,6 +34,16 @@ class MappingService(BaseService):
             "mapping.operation": "resolve"
         }) as span:
             try:
+                # Try to get from cache first
+                cached_result = self.cache_service.get_mapping_cache(path, method)
+                if cached_result:
+                    span.set_attribute("mapping.cache_hit", True)
+                    span.set_attribute("mapping.matched_action", cached_result.get("action"))
+                    span.set_attribute("mapping.mapping_id", cached_result.get("mapping_id"))
+                    return cached_result
+
+                span.set_attribute("mapping.cache_hit", False)
+
                 # Query all endpoints for the given method or 'ANY'
                 endpoints = (
                     db.query(Endpoint)
@@ -53,13 +65,19 @@ class MappingService(BaseService):
                             span.set_attribute("mapping.matched_action", endpoint.action.name)
                             span.set_attribute("mapping.mapping_id", endpoint.id)
 
-                            return {
+                            result = {
                                 "mapping_id": endpoint.id,
                                 "action": endpoint.action.name,
                                 "path_pattern": endpoint.path_pattern,
                                 "method": endpoint.method,
                                 "description": endpoint.description
                             }
+
+                            # Cache the result
+                            self.cache_service.set_mapping_cache(path, method, result)
+                            span.set_attribute("mapping.cached_result", True)
+
+                            return result
                     except re.error as e:
                         span.record_exception(e)
                         span.set_attribute("mapping.pattern_error", str(e))
@@ -133,6 +151,10 @@ class MappingService(BaseService):
                 db.add(endpoint)
                 db.commit()
                 db.refresh(endpoint)
+
+                # Invalidate mapping cache after creation
+                self.cache_service.invalidate_mapping_cache()
+                span.set_attribute("mapping.cache_invalidated", True)
 
                 span.set_attribute("mapping.id", endpoint.id)
                 span.set_attribute("mapping.created", True)
@@ -208,6 +230,10 @@ class MappingService(BaseService):
                     db.commit()
                     db.refresh(endpoint)
 
+                    # Invalidate mapping cache after update
+                    self.cache_service.invalidate_mapping_cache()
+                    span.set_attribute("mapping.cache_invalidated", True)
+
                 span.set_attribute("mapping.updated", updated)
 
                 return endpoint
@@ -237,6 +263,10 @@ class MappingService(BaseService):
 
                 db.delete(endpoint)
                 db.commit()
+
+                # Invalidate mapping cache after deletion
+                self.cache_service.invalidate_mapping_cache()
+                span.set_attribute("mapping.cache_invalidated", True)
 
                 span.set_attribute("mapping.deleted", True)
                 return True

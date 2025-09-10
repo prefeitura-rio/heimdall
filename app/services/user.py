@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Role, User, UserRole
 from app.services.base import BaseService
+from app.services.cache import CacheService
 
 
 class UserService(BaseService):
@@ -19,6 +20,7 @@ class UserService(BaseService):
     def __init__(self):
         super().__init__("user")
         self.keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "superapp")
+        self.cache_service = CacheService()
 
     def get_or_create_user(self, db: Session, jwt_payload: dict[str, Any]) -> User:
         """
@@ -140,6 +142,10 @@ class UserService(BaseService):
             db.add(user_role)
             db.commit()
 
+            # Invalidate user roles cache after role assignment
+            self.cache_service.invalidate_user_roles_cache(user.subject)
+            span.set_attribute("user.cache_invalidated", True)
+
             span.set_attribute("user.assigned_superadmin", True)
             span.set_attribute("user.superadmin_role_id", superadmin_role.id)
 
@@ -170,6 +176,10 @@ class UserService(BaseService):
             if existing_superadmin:
                 db.delete(existing_superadmin)
                 db.commit()
+
+                # Invalidate user roles cache after role removal
+                self.cache_service.invalidate_user_roles_cache(user.subject)
+                span.set_attribute("user.cache_invalidated", True)
                 span.set_attribute("user.removed_superadmin", True)
             else:
                 span.set_attribute("user.no_superadmin_to_remove", True)
@@ -204,7 +214,7 @@ class UserService(BaseService):
 
     def get_user_roles(self, _db: Session, user: User) -> list[str]:
         """
-        Get all roles for a user from both group_roles and user_roles.
+        Get all roles for a user from both group_roles and user_roles with Redis caching.
         Implements role aggregation as specified in SPEC.md.
         """
         with self.trace_operation(
@@ -216,6 +226,16 @@ class UserService(BaseService):
             },
         ) as span:
             try:
+                # Try to get from cache first
+                cached_roles = self.cache_service.get_user_roles_cache(user.subject)
+                if cached_roles is not None:
+                    span.set_attribute("user.cache_hit", True)
+                    span.set_attribute("user.roles_count", len(cached_roles))
+                    span.set_attribute("user.roles", cached_roles)
+                    return cached_roles
+
+                span.set_attribute("user.cache_hit", False)
+
                 roles = set()
 
                 # Get roles from group memberships
@@ -228,6 +248,11 @@ class UserService(BaseService):
                     roles.add(user_role.role.name)
 
                 role_list = list(roles)
+
+                # Cache the result
+                self.cache_service.set_user_roles_cache(user.subject, role_list)
+                span.set_attribute("user.cached_result", True)
+
                 span.set_attribute("user.roles_count", len(role_list))
                 span.set_attribute("user.roles", role_list)
 

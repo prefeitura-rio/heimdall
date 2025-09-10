@@ -314,18 +314,21 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
 - [x] Update SPEC.md to document automatic role assignment feature
 - [x] Include comprehensive error handling and OpenTelemetry tracing
 
-### Task 12.4: Redis Caching Integration
-- [ ] Add Redis to docker-compose.yml with appropriate configuration
-- [ ] Add redis dependency to pyproject.toml
-- [ ] Create Redis cache service in `app/services/cache.py`:
+### Task 12.4: Redis Caching Integration ✅
+- [x] Add Redis to docker-compose.yml with appropriate configuration
+- [x] Add redis dependency to pyproject.toml
+- [x] Create Redis cache service in `app/services/cache.py`:
   - Redis connection with connection pooling
   - Cache key utilities and TTL management
   - Error handling and fallback to database
-- [ ] Implement mapping resolution caching:
+- [x] Implement mapping resolution caching:
   - Cache GET /mappings results with 60s TTL
   - Cache invalidation on mapping CRUD operations
   - Tracing integration for cache hits/misses
-- [ ] Add cache monitoring and metrics via OpenTelemetry
+- [x] Add user role aggregation caching with 30s TTL
+- [x] Add JWKS caching with 300s TTL for JWT verification
+- [x] Add cache invalidation on membership and role changes
+- [x] Add cache monitoring and metrics via OpenTelemetry
 
 ## 📋 Phase 13: Audit System
 
