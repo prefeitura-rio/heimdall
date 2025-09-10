@@ -3,20 +3,16 @@ Health and monitoring endpoints for Heimdall Admin Service.
 Implements health checks as specified in SPEC.md Section 3.7.
 """
 
-import os
-import platform
 from datetime import UTC, datetime
 from typing import Any
 
-import psutil
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.config import get_config
 from app.database import get_db
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
-from app.services.database_monitor import get_database_monitor
 
 router = APIRouter(prefix="/api/v1", tags=["health"])
 
@@ -62,7 +58,7 @@ async def readiness_check(
     # Database connectivity check
     try:
         # Simple query to test database connection
-        db.execute("SELECT 1").scalar()
+        db.execute(text("SELECT 1")).scalar()
         checks["database"] = True
     except Exception as e:
         checks["database"] = False
@@ -108,96 +104,3 @@ async def readiness_check(
         )
 
     return response
-
-
-@router.get("/version")
-async def version_info() -> dict[str, Any]:
-    """
-    Service version information endpoint.
-    Returns version and build information.
-    """
-    return {
-        "service": "heimdall-admin-service",
-        "version": "1.0.0",
-        "build": {
-            "commit": os.getenv("GIT_COMMIT", "unknown"),
-            "date": os.getenv("BUILD_DATE", "unknown"),
-            "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}.{psutil.sys.version_info.micro}",
-        },
-        "environment": {
-            "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}.{psutil.sys.version_info.micro}",
-            "platform": platform.system(),
-            "architecture": platform.machine(),
-        },
-    }
-
-
-@router.get("/metrics")
-async def metrics_info(
-    cache_service: CacheService = Depends(get_cache_service),
-) -> dict[str, Any]:
-    """
-    Basic metrics endpoint for monitoring.
-    Returns system and cache metrics.
-    """
-    # System metrics
-    memory = psutil.virtual_memory()
-    cpu_percent = psutil.cpu_percent(interval=1)
-
-    # Cache metrics
-    cache_stats = cache_service.get_cache_stats()
-
-    return {
-        "service": "heimdall-admin-service",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "system": {
-            "memory": {
-                "total": memory.total,
-                "available": memory.available,
-                "percent": memory.percent,
-                "used": memory.used,
-            },
-            "cpu": {"percent": cpu_percent},
-        },
-        "cache": cache_stats,
-    }
-
-
-@router.get("/config")
-async def config_info() -> dict[str, Any]:
-    """
-    Configuration information endpoint.
-    Returns safe configuration summary (sensitive values masked).
-    """
-    config = get_config()
-    return {
-        "service": "heimdall-admin-service",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "configuration": config.get_config_summary(),
-        "validation_status": "valid",
-    }
-
-
-@router.get("/database")
-async def database_info(
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    """
-    Database performance and health information endpoint.
-    Returns database statistics, performance metrics, and optimization suggestions.
-    """
-    monitor = get_database_monitor()
-
-    # Get comprehensive database health info
-    health_info = monitor.check_database_health(db)
-
-    # Get optimization suggestions
-    suggestions = monitor.suggest_optimizations()
-
-    return {
-        "service": "heimdall-admin-service",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "database_health": health_info,
-        "optimization_suggestions": suggestions,
-        "monitoring_enabled": True,
-    }

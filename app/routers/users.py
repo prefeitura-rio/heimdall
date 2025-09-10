@@ -16,24 +16,24 @@ from app.services.user import UserService
 router = APIRouter()
 
 
-@router.get("/{subject}")
-async def get_user_by_subject(
-    subject: str,
+@router.get("/{cpf}")
+async def get_user_by_cpf(
+    cpf: str,
     _current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     user_service: Annotated[UserService, Depends(lambda: UserService())],
 ):
     """
-    Get user by subject with groups and roles.
-    Implements GET /users/{subject} as specified in SPEC.md Section 3.1.
+    Get user by CPF (preferred_username) with groups and roles.
+    Implements GET /users/{cpf} as specified in SPEC.md Section 3.1.
     """
-    # Get the requested user
-    user = user_service.get_user_by_subject(db, subject)
+    # Get the requested user by CPF (preferred_username is stored as subject)
+    user = user_service.get_user_by_subject(db, cpf)
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with subject '{subject}' not found",
+            detail=f"User with CPF '{cpf}' not found",
         )
 
     # Get user's roles and groups
@@ -45,7 +45,7 @@ async def get_user_by_subject(
 
     return {
         "id": user.id,
-        "subject": user.subject,
+        "cpf": user.subject,  # subject contains the CPF (preferred_username)
         "display_name": user.display_name,
         "groups": group_names,
         "roles": user_roles,

@@ -9,13 +9,14 @@ import signal
 import sys
 from typing import Any
 
-# Load environment variables from .env file
-from dotenv import load_dotenv
-load_dotenv()
-
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from opentelemetry import trace
+
+# Load environment variables from .env file before importing app modules
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from app.config import validate_environment
 from app.database import get_db_session
