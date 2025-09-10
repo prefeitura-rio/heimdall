@@ -6,11 +6,16 @@ Implements OpenTelemetry tracing setup as specified in SPEC.md Section 6.
 import time
 from typing import Annotated
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
+from sqlalchemy import text
 
 from app.config import validate_environment
 from app.database import engine, get_db
@@ -227,7 +232,7 @@ async def readiness_check(db=Depends(get_db)):
     with tracer.start_span("readiness_check") as span:
         try:
             # Test database connectivity
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
             span.set_attribute("db.connection", "healthy")
 
             return {

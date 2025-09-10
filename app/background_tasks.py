@@ -9,6 +9,10 @@ import signal
 import sys
 from typing import Any
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from opentelemetry import trace
