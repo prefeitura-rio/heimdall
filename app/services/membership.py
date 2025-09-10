@@ -7,6 +7,7 @@ from opentelemetry import trace
 from sqlalchemy.orm import Session
 
 from app.models import Group, Membership, User
+from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
@@ -19,6 +20,7 @@ class MembershipService(BaseService):
         super().__init__("membership")
         self.cerbos_service = CerbosService()
         self.cache_service = CacheService()
+        self.audit_service = AuditService()
 
     def add_member_to_group(
         self,
@@ -56,6 +58,18 @@ class MembershipService(BaseService):
                         span.set_attribute("membership.permission_denied", True)
                         span.set_status(
                             trace.Status(trace.StatusCode.ERROR, "Permission denied")
+                        )
+
+                        # Log failed permission check
+                        self.audit_service.safe_log_operation(
+                            db=db,
+                            actor_subject=caller_subject,
+                            operation="add_member",
+                            target_type="membership",
+                            target_id=f"group:{group_name}:member:{member_subject}",
+                            request_payload={"group_name": group_name, "member_subject": member_subject},
+                            result={"error": "Permission denied"},
+                            success=False,
                         )
                         return False
 
@@ -136,6 +150,23 @@ class MembershipService(BaseService):
                         policy_span.record_exception(e)
                         policy_span.set_attribute("cerbos.policy_error", str(e))
 
+                # Log successful membership addition
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=caller_subject,
+                    operation="add_member",
+                    target_type="membership",
+                    target_id=f"group:{group_name}:member:{member_subject}",
+                    request_payload={"group_name": group_name, "member_subject": member_subject},
+                    result={
+                        "membership_created": True,
+                        "group_id": group.id,
+                        "user_id": user.id,
+                        "policy_pushed": policy_pushed
+                    },
+                    success=True,
+                )
+
                 span.set_attribute("membership.success", True)
                 return True
 
@@ -144,6 +175,18 @@ class MembershipService(BaseService):
                 span.set_attribute("membership.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed membership addition
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=caller_subject,
+                    operation="add_member",
+                    target_type="membership",
+                    target_id=f"group:{group_name}:member:{member_subject}",
+                    request_payload={"group_name": group_name, "member_subject": member_subject},
+                    result={"error": str(e)},
+                    success=False,
+                )
                 raise
 
     def remove_member_from_group(
@@ -178,6 +221,18 @@ class MembershipService(BaseService):
                     span.set_attribute("membership.permission_denied", True)
                     span.set_status(
                         trace.Status(trace.StatusCode.ERROR, "Permission denied")
+                    )
+
+                    # Log failed permission check
+                    self.audit_service.safe_log_operation(
+                        db=db,
+                        actor_subject=caller_subject,
+                        operation="remove_member",
+                        target_type="membership",
+                        target_id=f"group:{group_name}:member:{member_subject}",
+                        request_payload={"group_name": group_name, "member_subject": member_subject},
+                        result={"error": "Permission denied"},
+                        success=False,
                     )
                     return False
 
@@ -223,6 +278,21 @@ class MembershipService(BaseService):
                     span.record_exception(e)
                     span.set_attribute("cerbos.policy_update_failed", True)
 
+                # Log successful membership removal
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=caller_subject,
+                    operation="remove_member",
+                    target_type="membership",
+                    target_id=f"group:{group_name}:member:{member_subject}",
+                    request_payload={"group_name": group_name, "member_subject": member_subject},
+                    result={
+                        "membership_removed": True,
+                        "remaining_roles_count": len(user_roles),
+                    },
+                    success=True,
+                )
+
                 span.set_attribute("membership.removed", True)
                 return True
 
@@ -231,6 +301,18 @@ class MembershipService(BaseService):
                 span.set_attribute("membership.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed membership removal
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=caller_subject,
+                    operation="remove_member",
+                    target_type="membership",
+                    target_id=f"group:{group_name}:member:{member_subject}",
+                    request_payload={"group_name": group_name, "member_subject": member_subject},
+                    result={"error": str(e)},
+                    success=False,
+                )
                 raise
 
     def _get_user_roles_after_membership_change(self, db: Session, user: User) -> list[str]:

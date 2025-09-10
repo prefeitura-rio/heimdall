@@ -8,6 +8,7 @@ from opentelemetry import trace
 from sqlalchemy.orm import Session
 
 from app.models import Group, User
+from app.services.audit import AuditService
 from app.services.base import BaseService
 
 
@@ -16,6 +17,7 @@ class GroupService(BaseService):
 
     def __init__(self):
         super().__init__("group")
+        self.audit_service = AuditService()
 
     def create_group(
         self, db: Session, name: str, description: str, created_by: User
@@ -50,6 +52,19 @@ class GroupService(BaseService):
                 span.set_attribute("group.id", group.id)
                 span.set_attribute("group.created", True)
 
+                # Log successful group creation
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=created_by.subject,
+                    operation="create_group",
+                    target_type="group",
+                    target_id=f"group:{name}",
+                    request_payload={"name": name, "description": description},
+                    result={"group_id": group.id, "name": name},
+                    success=True,
+                    actor_user_id=created_by.id,
+                )
+
                 return group
 
             except Exception as e:
@@ -57,6 +72,19 @@ class GroupService(BaseService):
                 span.set_attribute("group.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed group creation
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=created_by.subject,
+                    operation="create_group",
+                    target_type="group",
+                    target_id=f"group:{name}",
+                    request_payload={"name": name, "description": description},
+                    result={"error": str(e)},
+                    success=False,
+                    actor_user_id=created_by.id,
+                )
                 raise
 
     def list_groups(self, db: Session, prefix: str | None = None) -> list[Group]:
@@ -122,6 +150,23 @@ class GroupService(BaseService):
 
                 span.set_attribute("group.deleted", True)
 
+                # Log successful group deletion
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=deleted_by.subject,
+                    operation="delete_group",
+                    target_type="group",
+                    target_id=f"group:{group_name}",
+                    request_payload={"group_name": group_name},
+                    result={
+                        "deleted": True,
+                        "memberships_removed": memberships_count,
+                        "group_roles_removed": group_roles_count
+                    },
+                    success=True,
+                    actor_user_id=deleted_by.id,
+                )
+
                 return True
 
             except Exception as e:
@@ -129,6 +174,19 @@ class GroupService(BaseService):
                 span.set_attribute("group.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed group deletion
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=deleted_by.subject,
+                    operation="delete_group",
+                    target_type="group",
+                    target_id=f"group:{group_name}",
+                    request_payload={"group_name": group_name},
+                    result={"error": str(e)},
+                    success=False,
+                    actor_user_id=deleted_by.id,
+                )
                 raise
 
     def get_group_by_name(self, db: Session, name: str) -> Group | None:

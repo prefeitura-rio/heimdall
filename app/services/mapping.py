@@ -10,6 +10,7 @@ from opentelemetry import trace
 from sqlalchemy.orm import Session
 
 from app.models import Action, Endpoint, User
+from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
@@ -22,6 +23,7 @@ class MappingService(BaseService):
         super().__init__("mapping")
         self.cerbos_service = CerbosService()
         self.cache_service = CacheService()
+        self.audit_service = AuditService()
 
     def resolve_mapping(self, db: Session, path: str, method: str) -> dict[str, Any] | None:
         """
@@ -159,6 +161,28 @@ class MappingService(BaseService):
                 span.set_attribute("mapping.id", endpoint.id)
                 span.set_attribute("mapping.created", True)
 
+                # Log successful mapping creation
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=created_by.subject,
+                    operation="create_mapping",
+                    target_type="mapping",
+                    target_id=f"mapping:{endpoint.id}",
+                    request_payload={
+                        "path_pattern": path_pattern,
+                        "method": method,
+                        "action_name": action_name,
+                        "description": description
+                    },
+                    result={
+                        "mapping_id": endpoint.id,
+                        "action_id": action.id,
+                        "action_created": span.attributes.get("mapping.action_created", False)
+                    },
+                    success=True,
+                    actor_user_id=created_by.id,
+                )
+
                 return endpoint
 
             except Exception as e:
@@ -166,6 +190,24 @@ class MappingService(BaseService):
                 span.set_attribute("mapping.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed mapping creation
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=created_by.subject,
+                    operation="create_mapping",
+                    target_type="mapping",
+                    target_id=f"mapping:{method}:{path_pattern}",
+                    request_payload={
+                        "path_pattern": path_pattern,
+                        "method": method,
+                        "action_name": action_name,
+                        "description": description
+                    },
+                    result={"error": str(e)},
+                    success=False,
+                    actor_user_id=created_by.id,
+                )
                 raise
 
     def update_mapping(
@@ -234,6 +276,33 @@ class MappingService(BaseService):
                     self.cache_service.invalidate_mapping_cache()
                     span.set_attribute("mapping.cache_invalidated", True)
 
+                    # Log successful mapping update
+                    self.audit_service.safe_log_operation(
+                        db=db,
+                        actor_subject=updated_by.subject,
+                        operation="update_mapping",
+                        target_type="mapping",
+                        target_id=f"mapping:{mapping_id}",
+                        request_payload={
+                            "mapping_id": mapping_id,
+                            "path_pattern": path_pattern,
+                            "method": method,
+                            "action_name": action_name,
+                            "description": description
+                        },
+                        result={
+                            "mapping_updated": True,
+                            "fields_updated": {
+                                "path_pattern": path_pattern is not None,
+                                "method": method is not None,
+                                "action_name": action_name is not None,
+                                "description": description is not None
+                            }
+                        },
+                        success=True,
+                        actor_user_id=updated_by.id,
+                    )
+
                 span.set_attribute("mapping.updated", updated)
 
                 return endpoint
@@ -243,6 +312,25 @@ class MappingService(BaseService):
                 span.set_attribute("mapping.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed mapping update
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=updated_by.subject,
+                    operation="update_mapping",
+                    target_type="mapping",
+                    target_id=f"mapping:{mapping_id}",
+                    request_payload={
+                        "mapping_id": mapping_id,
+                        "path_pattern": path_pattern,
+                        "method": method,
+                        "action_name": action_name,
+                        "description": description
+                    },
+                    result={"error": str(e)},
+                    success=False,
+                    actor_user_id=updated_by.id,
+                )
                 raise
 
     def delete_mapping(self, db: Session, mapping_id: int, deleted_by: User) -> bool:
@@ -268,6 +356,23 @@ class MappingService(BaseService):
                 self.cache_service.invalidate_mapping_cache()
                 span.set_attribute("mapping.cache_invalidated", True)
 
+                # Log successful mapping deletion
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=deleted_by.subject,
+                    operation="delete_mapping",
+                    target_type="mapping",
+                    target_id=f"mapping:{mapping_id}",
+                    request_payload={"mapping_id": mapping_id},
+                    result={
+                        "mapping_deleted": True,
+                        "path_pattern": endpoint.path_pattern,
+                        "method": endpoint.method
+                    },
+                    success=True,
+                    actor_user_id=deleted_by.id,
+                )
+
                 span.set_attribute("mapping.deleted", True)
                 return True
 
@@ -276,6 +381,19 @@ class MappingService(BaseService):
                 span.set_attribute("mapping.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed mapping deletion
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=deleted_by.subject,
+                    operation="delete_mapping",
+                    target_type="mapping",
+                    target_id=f"mapping:{mapping_id}",
+                    request_payload={"mapping_id": mapping_id},
+                    result={"error": str(e)},
+                    success=False,
+                    actor_user_id=deleted_by.id,
+                )
                 raise
 
     def list_mappings(self, db: Session, action_filter: str | None = None) -> list[Endpoint]:

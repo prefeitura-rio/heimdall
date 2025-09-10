@@ -7,6 +7,7 @@ from opentelemetry import trace
 from sqlalchemy.orm import Session
 
 from app.models import Group, GroupRole, Role, User
+from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
@@ -19,6 +20,7 @@ class RoleService(BaseService):
         super().__init__("role")
         self.cerbos_service = CerbosService()
         self.cache_service = CacheService()
+        self.audit_service = AuditService()
 
     def create_role(self, db: Session, name: str, description: str, created_by: User) -> Role:
         """
@@ -51,6 +53,19 @@ class RoleService(BaseService):
                 span.set_attribute("role.id", role.id)
                 span.set_attribute("role.created", True)
 
+                # Log successful role creation
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=created_by.subject,
+                    operation="create_role",
+                    target_type="role",
+                    target_id=f"role:{name}",
+                    request_payload={"name": name, "description": description},
+                    result={"role_id": role.id, "name": name},
+                    success=True,
+                    actor_user_id=created_by.id,
+                )
+
                 return role
 
             except Exception as e:
@@ -58,6 +73,19 @@ class RoleService(BaseService):
                 span.set_attribute("role.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed role creation
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=created_by.subject,
+                    operation="create_role",
+                    target_type="role",
+                    target_id=f"role:{name}",
+                    request_payload={"name": name, "description": description},
+                    result={"error": str(e)},
+                    success=False,
+                    actor_user_id=created_by.id,
+                )
                 raise
 
     def list_roles(self, db: Session) -> list[Role]:
@@ -136,6 +164,24 @@ class RoleService(BaseService):
                     self.cache_service.invalidate_user_roles_cache(membership.user.subject)
                 span.set_attribute("role.cache_invalidated_members", len(group.memberships))
 
+                # Log successful role assignment
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=assigned_by.subject,
+                    operation="assign_role_to_group",
+                    target_type="role",
+                    target_id=f"group:{group_name}:role:{role_name}",
+                    request_payload={"group_name": group_name, "role_name": role_name},
+                    result={
+                        "role_assigned": True,
+                        "group_id": group.id,
+                        "role_id": role.id,
+                        "members_affected": len(group.memberships)
+                    },
+                    success=True,
+                    actor_user_id=assigned_by.id,
+                )
+
                 return True
 
             except Exception as e:
@@ -143,6 +189,19 @@ class RoleService(BaseService):
                 span.set_attribute("role.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed role assignment
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=assigned_by.subject,
+                    operation="assign_role_to_group",
+                    target_type="role",
+                    target_id=f"group:{group_name}:role:{role_name}",
+                    request_payload={"group_name": group_name, "role_name": role_name},
+                    result={"error": str(e)},
+                    success=False,
+                    actor_user_id=assigned_by.id,
+                )
                 raise
 
     def remove_role_from_group(
@@ -188,6 +247,22 @@ class RoleService(BaseService):
                     self.cache_service.invalidate_user_roles_cache(membership.user.subject)
                 span.set_attribute("role.cache_invalidated_members", len(group.memberships))
 
+                # Log successful role removal
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=removed_by.subject,
+                    operation="remove_role_from_group",
+                    target_type="role",
+                    target_id=f"group:{group_name}:role:{role_name}",
+                    request_payload={"group_name": group_name, "role_name": role_name},
+                    result={
+                        "role_removed": True,
+                        "members_affected": len(group.memberships)
+                    },
+                    success=True,
+                    actor_user_id=removed_by.id,
+                )
+
                 return True
 
             except Exception as e:
@@ -195,6 +270,19 @@ class RoleService(BaseService):
                 span.set_attribute("role.error", str(e))
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 db.rollback()
+
+                # Log failed role removal
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=removed_by.subject,
+                    operation="remove_role_from_group",
+                    target_type="role",
+                    target_id=f"group:{group_name}:role:{role_name}",
+                    request_payload={"group_name": group_name, "role_name": role_name},
+                    result={"error": str(e)},
+                    success=False,
+                    actor_user_id=removed_by.id,
+                )
                 raise
 
     def _update_member_policies_after_role_change(self, db: Session, group: Group, span: trace.Span) -> None:
