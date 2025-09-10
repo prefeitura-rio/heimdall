@@ -19,14 +19,12 @@ class CerbosService(BaseService):
 
     def __init__(self):
         super().__init__("cerbos")
-        self.check_url = os.getenv(
-            "CERBOS_CHECK_URL", "http://cerbos:3593/api/check/resources"
-        )
-        self.admin_url = os.getenv(
-            "CERBOS_ADMIN_URL", "http://cerbos:3592/admin/policy"
-        )
-        self.admin_user = os.getenv("CERBOS_ADMIN_USER", "admin")
-        self.admin_password = os.getenv("CERBOS_ADMIN_PASSWORD", "password")
+        self.base_url = os.getenv("CERBOS_BASE_URL", "http://localhost:3592")
+        self.check_url = f"{self.base_url}/api/check/resources"
+        self.admin_url = f"{self.base_url}/admin/policy"
+        self.server_info_url = f"{self.base_url}/api/server_info"
+        self.admin_user = os.getenv("CERBOS_ADMIN_USER", "cerbos")
+        self.admin_password = os.getenv("CERBOS_ADMIN_PASSWORD", "cerbos")
         self.max_retries = 3
         self.base_retry_delay = 1.0  # seconds
 
@@ -422,34 +420,25 @@ class CerbosService(BaseService):
             "health_check", {"cerbos.operation": "health_check"}
         ) as span:
             try:
-                # Simple connectivity test - try to make a basic request to Cerbos
-                # In a real implementation, Cerbos might have a dedicated health endpoint
-                # For now, we'll test with a minimal check request
-                test_payload = {
-                    "requestId": "health-check",
-                    "principal": {
-                        "id": "health-check",
-                        "roles": [],
-                        "policyVersion": "default",
-                        "attr": {},
-                    },
-                    "resources": [
-                        {
-                            "resource": {"id": "health-check", "attr": {}},
-                            "actions": ["read"],
-                        }
-                    ],
-                }
+                span.set_attribute("cerbos.server_info_url", self.server_info_url)
 
                 def _make_health_request():
-                    return requests.post(self.check_url, json=test_payload, timeout=5)
+                    return requests.get(self.server_info_url, timeout=5)
 
                 response = self._retry_with_backoff(_make_health_request)
 
-                # If we get any response (even denied), Cerbos is healthy
-                is_healthy = response.status_code in [200, 403]
+                # Cerbos is healthy if server_info returns 200
+                is_healthy = response.status_code == 200
                 span.set_attribute("cerbos.healthy", is_healthy)
                 span.set_attribute("http.status_code", response.status_code)
+                
+                if is_healthy:
+                    # Log server info for debugging
+                    try:
+                        server_info = response.json()
+                        span.set_attribute("cerbos.version", server_info.get("version", "unknown"))
+                    except:
+                        pass  # Ignore JSON parsing errors
 
                 return is_healthy
 
