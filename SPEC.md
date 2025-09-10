@@ -167,6 +167,8 @@ The Admin Service verifies the JWT, automatically creates user entries, and call
 
 **Note:** Users are automatically created when they access any endpoint with a valid JWT. No manual import is needed. The user's subject (CPF) is extracted from the JWT `preferred_username` field, and display_name from the `name` field.
 
+**Automatic Role Assignment:** Users with the Keycloak client role "heimdall-admin" (found in `resource_access.<client_id>.roles`) are automatically granted the "superadmin" role in the system. This provides administrative privileges without manual role assignment.
+
 #### GET /users/{subject}
 
 Return user, groups, roles.
@@ -476,6 +478,7 @@ CERBOS_ADMIN_PASSWORD=password
 KEYCLOAK_JWKS_URL=https://keycloak.example.com/auth/realms/realm/protocol/openid-connect/certs
 JWT_ALGORITHM=RS256
 JWT_AUDIENCE=your-audience
+KEYCLOAK_CLIENT_ID=superapp  # Client ID for extracting heimdall-admin role
 
 # API Authentication
 STATIC_API_TOKEN=your-static-token-for-adapters

@@ -3,12 +3,13 @@ User management service with OpenTelemetry tracing.
 Implements auto-user creation and user management with distributed tracing.
 """
 
+import os
 from typing import Any
 
 from opentelemetry import trace
 from sqlalchemy.orm import Session
 
-from app.models import User
+from app.models import Role, User, UserRole
 from app.services.base import BaseService
 
 
@@ -17,6 +18,7 @@ class UserService(BaseService):
 
     def __init__(self):
         super().__init__("user")
+        self.keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "superapp")
 
     def get_or_create_user(self, db: Session, jwt_payload: dict[str, Any]) -> User:
         """
@@ -45,6 +47,9 @@ class UserService(BaseService):
                         db.commit()
                         span.set_attribute("user.display_name_updated", True)
 
+                    # Check and update superadmin role if needed
+                    self._ensure_superadmin_role(db, user, jwt_payload, span)
+
                     span.set_attribute("user.found_existing", True)
                     span.set_attribute("user.user_id", user.id)
                     return user
@@ -56,6 +61,9 @@ class UserService(BaseService):
                 db.add(user)
                 db.commit()
                 db.refresh(user)
+
+                # Check and assign superadmin role if user has heimdall-admin
+                self._ensure_superadmin_role(db, user, jwt_payload, span)
 
                 span.set_attribute("user.created_new", True)
                 span.set_attribute("user.user_id", user.id)
@@ -84,6 +92,92 @@ class UserService(BaseService):
                 return value
 
         return None
+
+    def _ensure_superadmin_role(self, db: Session, user: User, jwt_payload: dict[str, Any], span: trace.Span) -> None:
+        """
+        Check if user has heimdall-admin client role and automatically assign superadmin role.
+        Implements automatic role assignment as specified in SPEC.md Section 3.1.
+        """
+        try:
+            # Check if user has heimdall-admin role in resource_access
+            has_heimdall_admin = self._has_heimdall_admin_role(jwt_payload)
+            span.set_attribute("user.has_heimdall_admin", has_heimdall_admin)
+
+            if not has_heimdall_admin:
+                # User doesn't have heimdall-admin role, check if they have superadmin and remove it
+                self._remove_superadmin_if_exists(db, user, span)
+                return
+
+            # User has heimdall-admin role, ensure they have superadmin
+            existing_superadmin = (
+                db.query(UserRole)
+                .join(Role)
+                .filter(UserRole.user_id == user.id, Role.name == "superadmin")
+                .first()
+            )
+
+            if existing_superadmin:
+                span.set_attribute("user.already_has_superadmin", True)
+                return
+
+            # Create superadmin role if it doesn't exist
+            superadmin_role = db.query(Role).filter(Role.name == "superadmin").first()
+            if not superadmin_role:
+                superadmin_role = Role(
+                    name="superadmin",
+                    description="Super administrator with full system access"
+                )
+                db.add(superadmin_role)
+                db.flush()  # Get the ID
+                span.set_attribute("user.created_superadmin_role", True)
+
+            # Assign superadmin role to user
+            user_role = UserRole(
+                user_id=user.id,
+                role_id=superadmin_role.id,
+                granted_by=user.id  # Self-granted through JWT
+            )
+            db.add(user_role)
+            db.commit()
+
+            span.set_attribute("user.assigned_superadmin", True)
+            span.set_attribute("user.superadmin_role_id", superadmin_role.id)
+
+        except Exception as e:
+            span.record_exception(e)
+            span.set_attribute("user.superadmin_assignment_error", str(e))
+            # Don't fail user creation if role assignment fails
+            db.rollback()
+
+    def _has_heimdall_admin_role(self, jwt_payload: dict[str, Any]) -> bool:
+        """Check if user has heimdall-admin role in Keycloak client roles."""
+        resource_access = jwt_payload.get("resource_access", {})
+        client_access = resource_access.get(self.keycloak_client_id, {})
+        client_roles = client_access.get("roles", [])
+
+        return "heimdall-admin" in client_roles
+
+    def _remove_superadmin_if_exists(self, db: Session, user: User, span: trace.Span) -> None:
+        """Remove superadmin role if user no longer has heimdall-admin role."""
+        try:
+            existing_superadmin = (
+                db.query(UserRole)
+                .join(Role)
+                .filter(UserRole.user_id == user.id, Role.name == "superadmin")
+                .first()
+            )
+
+            if existing_superadmin:
+                db.delete(existing_superadmin)
+                db.commit()
+                span.set_attribute("user.removed_superadmin", True)
+            else:
+                span.set_attribute("user.no_superadmin_to_remove", True)
+
+        except Exception as e:
+            span.record_exception(e)
+            span.set_attribute("user.superadmin_removal_error", str(e))
+            db.rollback()
 
     def get_user_by_subject(self, db: Session, subject: str) -> User | None:
         """Get user by subject with tracing."""
