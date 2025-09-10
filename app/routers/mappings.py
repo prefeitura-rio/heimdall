@@ -23,14 +23,14 @@ router = APIRouter()
 class MappingCreateRequest(BaseModel):
     path_pattern: str
     method: str
-    action: str
+    action_id: int
     description: str | None = None
 
 
 class MappingUpdateRequest(BaseModel):
     path_pattern: str | None = None
     method: str | None = None
-    action: str | None = None
+    action_id: int | None = None
     description: str | None = None
 
 
@@ -98,7 +98,7 @@ async def create_mapping(
     can_create = cerbos_service.can_create_mapping(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action_name=mapping_data.action,
+        action_name=f"action_{mapping_data.action_id}",  # Use action_id for permission check
     )
 
     if not can_create:
@@ -113,7 +113,7 @@ async def create_mapping(
             db=db,
             path_pattern=mapping_data.path_pattern,
             method=mapping_data.method,
-            action_name=mapping_data.action,
+            action_id=mapping_data.action_id,
             description=mapping_data.description,
             created_by=current_user,
         )
@@ -169,7 +169,7 @@ async def update_mapping(
             mapping_id=mapping_id,
             path_pattern=mapping_data.path_pattern,
             method=mapping_data.method,
-            action_name=mapping_data.action,
+            action_id=mapping_data.action_id,
             description=mapping_data.description,
             updated_by=current_user,
         )

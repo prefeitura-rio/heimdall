@@ -112,7 +112,7 @@ class MappingService(BaseService):
         db: Session,
         path_pattern: str,
         method: str,
-        action_name: str,
+        action_id: int,
         description: str | None,
         created_by: User,
     ) -> Endpoint:
@@ -125,7 +125,7 @@ class MappingService(BaseService):
             {
                 "mapping.path_pattern": path_pattern,
                 "mapping.method": method,
-                "mapping.action": action_name,
+                "mapping.action_id": action_id,
                 "mapping.created_by": created_by.subject,
                 "mapping.operation": "create",
             },
@@ -139,15 +139,13 @@ class MappingService(BaseService):
                     span.set_attribute("mapping.invalid_pattern", True)
                     raise ValueError(f"Invalid path pattern: {e}")
 
-                # Find or create the action
-                action = db.query(Action).filter(Action.name == action_name).first()
+                # Validate that the action exists
+                action = db.query(Action).filter(Action.id == action_id).first()
                 if not action:
-                    action = Action(
-                        name=action_name, description=f"Action for {action_name}"
-                    )
-                    db.add(action)
-                    db.flush()  # Get the ID
-                    span.set_attribute("mapping.action_created", True)
+                    span.set_attribute("mapping.action_not_found", True)
+                    raise ValueError(f"Action with ID {action_id} not found")
+                
+                span.set_attribute("mapping.action_name", action.name)
 
                 # Check if mapping already exists
                 existing = (
@@ -194,7 +192,8 @@ class MappingService(BaseService):
                     request_payload={
                         "path_pattern": path_pattern,
                         "method": method,
-                        "action_name": action_name,
+                        "action_id": action_id,
+                        "action_name": action.name,
                         "description": description,
                     },
                     result={
@@ -217,6 +216,14 @@ class MappingService(BaseService):
                 db.rollback()
 
                 # Log failed mapping creation
+                # Try to get action name if action lookup succeeded
+                action_name = None
+                try:
+                    if 'action' in locals():
+                        action_name = action.name
+                except:
+                    pass
+                
                 self.audit_service.safe_log_operation(
                     db=db,
                     actor_subject=created_by.subject,
@@ -226,6 +233,7 @@ class MappingService(BaseService):
                     request_payload={
                         "path_pattern": path_pattern,
                         "method": method,
+                        "action_id": action_id,
                         "action_name": action_name,
                         "description": description,
                     },
@@ -241,7 +249,7 @@ class MappingService(BaseService):
         mapping_id: int,
         path_pattern: str | None,
         method: str | None,
-        action_name: str | None,
+        action_id: int | None,
         description: str | None,
         updated_by: User,
     ) -> Endpoint:
@@ -281,16 +289,14 @@ class MappingService(BaseService):
                     endpoint.method = method
                     updated = True
 
-                if action_name is not None:
-                    # Find or create the action
-                    action = db.query(Action).filter(Action.name == action_name).first()
+                if action_id is not None:
+                    # Validate that the action exists
+                    action = db.query(Action).filter(Action.id == action_id).first()
                     if not action:
-                        action = Action(
-                            name=action_name, description=f"Action for {action_name}"
-                        )
-                        db.add(action)
-                        db.flush()
-                    endpoint.action_id = action.id
+                        span.set_attribute("mapping.action_not_found", True)
+                        raise ValueError(f"Action with ID {action_id} not found")
+                    endpoint.action_id = action_id
+                    span.set_attribute("mapping.new_action_name", action.name)
                     updated = True
 
                 if description is not None:
@@ -317,7 +323,8 @@ class MappingService(BaseService):
                             "mapping_id": mapping_id,
                             "path_pattern": path_pattern,
                             "method": method,
-                            "action_name": action_name,
+                            "action_id": action_id,
+                        "action_name": action.name,
                             "description": description,
                         },
                         result={
@@ -325,7 +332,7 @@ class MappingService(BaseService):
                             "fields_updated": {
                                 "path_pattern": path_pattern is not None,
                                 "method": method is not None,
-                                "action_name": action_name is not None,
+                                "action_id": action_id is not None,
                                 "description": description is not None,
                             },
                         },
@@ -344,6 +351,14 @@ class MappingService(BaseService):
                 db.rollback()
 
                 # Log failed mapping update
+                # Try to get action name if action lookup succeeded
+                action_name = None
+                try:
+                    if 'action' in locals():
+                        action_name = action.name
+                except:
+                    pass
+                
                 self.audit_service.safe_log_operation(
                     db=db,
                     actor_subject=updated_by.subject,
@@ -354,6 +369,7 @@ class MappingService(BaseService):
                         "mapping_id": mapping_id,
                         "path_pattern": path_pattern,
                         "method": method,
+                        "action_id": action_id,
                         "action_name": action_name,
                         "description": description,
                     },
