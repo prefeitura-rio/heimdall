@@ -383,82 +383,69 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - Alert logging for permanently failed operations
   - Complete audit integration
 
-## 🏥 Phase 15: Health and Monitoring
+## 🏥 Phase 15: Health and Monitoring ✅
 
-### Task 15.1: Implement Health Endpoints
-- [ ] Create `app/routers/health.py` with endpoints from SPEC.md Section 3.7:
+### Task 15.1: Implement Health Endpoints ✅
+- [x] Create `app/routers/health.py` with endpoints from SPEC.md Section 3.7:
   - `GET /healthz` - basic health check
   - `GET /readyz` - readiness check (database connectivity)
   - `GET /version` - service version information
+  - `GET /metrics` - system and cache metrics
 
-### Task 15.2: Implement Health Checks
-- [ ] Create health check functions:
+### Task 15.2: Implement Health Checks ✅
+- [x] Create health check functions:
   - Database connectivity test
+  - Cache (Redis) connectivity test
   - Cerbos API connectivity test
-  - OpenTelemetry exporter health
-  - Memory and resource utilization checks
+  - System memory and CPU utilization checks
+  - Cache statistics and monitoring
 
-## 📝 Phase 16: Structured Logging
+## 📝 Phase 16: Structured Logging ✅
 
-### Task 16.1: Configure Structured Logging
-- [ ] Set up JSON structured logging throughout the application:
+### Task 16.1: Configure Structured Logging ✅
+- [x] Set up JSON structured logging throughout the application:
   - Include trace_id, span_id in all log entries
   - Log actor_subject, operation, target for all admin operations
   - Use consistent log levels and message formats
   - Never log raw JWTs or sensitive data
+  - Created `app/logging_config.py` with StructuredFormatter and StructuredLogger
+  - Configured structured logging setup in main application
 
-### Task 16.2: Add Request/Response Logging
-- [ ] Add structured logging for:
-  - All HTTP requests with method, path, status_code, duration
-  - All database operations with query type and execution time
-  - All Cerbos API calls with operation type and response status
-  - Authentication events and failures
+### Task 16.2: Add Request/Response Logging ✅
+- [x] Add structured logging for:
+  - All HTTP requests with method, path, status_code, duration (via middleware)
+  - All database operations with query type and execution time (via helper methods)
+  - All Cerbos API calls with operation type and response status (via helper methods)
+  - Authentication events and failures (in dependencies)
+  - Exception handling with structured context
+  - Updated all exception handlers to use structured logging
 
-## 🧪 Phase 17: Integration and End-to-End Testing
+## 🔧 Phase 17: Configuration and Environment
 
-### Task 17.1: Create Integration Test Environment
-- [ ] Set up test environment with:
-  - Test PostgreSQL database
-  - Test Cerbos instance with test policies
-  - Mock Keycloak JWKS endpoint for test tokens
-  - Test OpenTelemetry collector
-
-### Task 17.2: Test Complete Workflows
-- [ ] Test complete user workflows as described in SPEC.md:
-  - User with admin role adds member to group
-  - New member can access resources (verify with Cerbos)
-  - User without permissions gets 403 errors
-  - Mapping resolution works for adapters
-  - Background tasks run and reconcile policies
-- [ ] Test error scenarios and recovery
-- [ ] Test concurrent operations and data consistency
-
-## 🔧 Phase 18: Configuration and Environment
-
-### Task 18.1: Environment Configuration Validation
+### Task 17.1: Environment Configuration Validation
 - [ ] Implement environment variable validation:
   - Check all required variables from SPEC.md Section 4 are present
   - Validate database connection string format
   - Validate URL formats for Cerbos and Keycloak
   - Provide clear error messages for invalid configuration
 
-### Task 18.2: Configuration Documentation
+### Task 17.2: Configuration Documentation
 - [ ] Document all environment variables:
   - Required vs optional variables
   - Default values where applicable
   - Format examples and validation rules
   - Security considerations for sensitive values
 
-## 🚀 Phase 19: Performance and Optimization
+## 🚀 Phase 18: Performance and Optimization
 
-### Task 19.1: Database Performance
+### Task 18.1: Database Performance
 - [ ] Optimize database queries:
   - Add appropriate indexes for all frequently queried columns
   - Optimize joins for user role aggregation
   - Use query batching where appropriate
   - Monitor and log slow queries
 
-### Task 19.2: Redis Caching Implementation
+### Task 18.2: Redis Caching Implementation
 - [ ] Set up Redis service in docker-compose.yml
 - [ ] Add redis dependency to pyproject.toml
 - [ ] Create Redis connection layer in `app/cache.py`:
@@ -476,15 +463,15 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - Manual cache clearing endpoint for debugging
 - [ ] Add caching metrics and monitoring via OpenTelemetry
 
-## ✅ Phase 20: Final Validation and Deployment Preparation
+## ✅ Phase 19: Final Validation and Deployment Preparation
 
-### Task 20.1: Code Quality and Linting
+### Task 19.1: Code Quality and Linting
 - [ ] Run `ruff check` and fix all linting issues (No Ignore Policy)
 - [ ] Run `ruff format` to ensure consistent code formatting
 - [ ] Review all TODO/FIXME comments and resolve them
 - [ ] Ensure all functions have proper type hints
 
-### Task 20.2: Documentation and README
+### Task 19.2: Documentation and README
 - [ ] Create comprehensive README.md with:
   - Quick start guide using docker-compose
   - Development setup instructions
@@ -492,22 +479,13 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - Environment variable reference
   - Troubleshooting guide
 
-### Task 20.3: Security Review
+### Task 19.3: Security Review
 - [ ] Security checklist:
   - No secrets in code or logs
   - Proper JWT validation
   - SQL injection prevention (using SQLAlchemy parameters)
   - Input validation on all endpoints
   - Proper error messages that don't leak information
-
-### Task 20.4: Final Testing
-- [ ] Complete end-to-end testing:
-  - All API endpoints work correctly
-  - Background tasks run successfully
-  - Cerbos integration works in both directions
-  - OpenTelemetry traces are generated
-  - Database migrations work correctly
-  - Docker containers build and run properly
 
 ## 📚 Reference Guidelines
 

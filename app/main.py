@@ -3,10 +3,10 @@ FastAPI application entry point for Heimdall Admin Service.
 Implements OpenTelemetry tracing setup as specified in SPEC.md Section 6.
 """
 
-import logging
+import time
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,15 +14,16 @@ from opentelemetry import trace
 
 from app.database import engine, get_db
 from app.dependencies import get_current_user_with_roles
-from app.routers import groups, mappings, memberships, roles, users
+from app.logging_config import get_structured_logger, setup_structured_logging
+from app.routers import groups, health, mappings, memberships, roles, users
 from app.tracing import instrument_fastapi, instrument_sqlalchemy, setup_tracing
 
 # Initialize OpenTelemetry tracing before creating the FastAPI app
 setup_tracing()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+setup_structured_logging()
+logger = get_structured_logger(__name__)
 
 # Create FastAPI application
 app = FastAPI(
@@ -42,6 +43,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add request/response logging middleware
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next) -> Response:
+    """Middleware for structured HTTP request/response logging."""
+    start_time = time.time()
+
+    # Extract user agent
+    user_agent = request.headers.get("user-agent", "unknown")
+
+    # Get actor subject from authorization if present
+    actor_subject = None
+    if "authorization" in request.headers:
+        # This is a simplified extraction - in practice you'd parse the JWT
+        actor_subject = "authenticated_user"  # Would extract from JWT
+
+    response = await call_next(request)
+
+    # Calculate duration
+    duration_ms = (time.time() - start_time) * 1000
+
+    # Log the request/response
+    logger.log_http_request(
+        message=f"{request.method} {request.url.path} -> {response.status_code}",
+        method=request.method,
+        path=str(request.url.path),
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+        user_agent=user_agent,
+        actor_subject=actor_subject,
+    )
+
+    return response
+
 # Instrument FastAPI for automatic HTTP tracing
 instrument_fastapi(app)
 
@@ -60,13 +94,16 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         span.set_attribute("http.method", request.method)
         span.set_attribute("http.url", str(request.url))
 
-        logger.warning(
-            "HTTP exception occurred",
-            extra={
+        logger.log_operation(
+            level=40,  # WARNING level
+            message="HTTP exception occurred",
+            operation="http_exception",
+            extra_fields={
                 "status_code": exc.status_code,
                 "detail": exc.detail,
                 "method": request.method,
                 "url": str(request.url),
+                "exception_type": "HTTPException"
             }
         )
 
@@ -86,12 +123,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         span.set_attribute("http.method", request.method)
         span.set_attribute("http.url", str(request.url))
 
-        logger.warning(
-            "Request validation error",
-            extra={
-                "errors": exc.errors(),
+        logger.log_operation(
+            level=40,  # WARNING level
+            message="Request validation error",
+            operation="validation_exception",
+            extra_fields={
+                "validation_errors": exc.errors(),
                 "method": request.method,
                 "url": str(request.url),
+                "exception_type": "RequestValidationError"
             }
         )
 
@@ -113,15 +153,17 @@ async def general_exception_handler(request: Request, exc: Exception):
         span.set_attribute("http.url", str(request.url))
         span.record_exception(exc)
 
-        logger.error(
-            "Unhandled exception occurred",
-            extra={
+        logger.log_operation(
+            level=50,  # ERROR level
+            message="Unhandled exception occurred",
+            operation="general_exception",
+            extra_fields={
                 "exception_type": type(exc).__name__,
                 "exception_message": str(exc),
                 "method": request.method,
                 "url": str(request.url),
-            },
-            exc_info=True
+                "has_traceback": True
+            }
         )
 
         return JSONResponse(
@@ -181,6 +223,7 @@ async def root():
 
 
 # Router registration
+app.include_router(health.router, tags=["health"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
 app.include_router(memberships.router, prefix="/api/v1", tags=["memberships"])

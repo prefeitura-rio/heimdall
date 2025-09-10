@@ -20,6 +20,7 @@ dependencies = [
     "opentelemetry-instrumentation-sqlalchemy>=0.42b0",
     "apscheduler>=3.10.0",
     "redis>=5.0.0",
+    "psutil>=5.9.0",
 ]
 
 [tool.ruff]

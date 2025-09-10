@@ -10,12 +10,16 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.logging_config import get_structured_logger
 from app.models import User
 from app.services.auth import AuthService
 from app.services.user import UserService
 
 # Security scheme for JWT/API token authentication
 security = HTTPBearer()
+
+# Get structured logger
+logger = get_structured_logger(__name__)
 
 
 def get_auth_service() -> AuthService:
@@ -45,6 +49,12 @@ def get_current_user(
     auth_result = auth_service.authenticate_request(auth_header)
 
     if not auth_result:
+        logger.log_auth_event(
+            message="Authentication failed - invalid credentials",
+            event_type="jwt_auth_failed",
+            success=False,
+            error="Invalid authentication credentials"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
@@ -53,6 +63,12 @@ def get_current_user(
 
     # Handle static API token authentication
     if auth_result.get("type") == "static_api":
+        logger.log_auth_event(
+            message="Authentication failed - static token not allowed",
+            event_type="jwt_required",
+            success=False,
+            error="JWT token required for this endpoint"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="JWT token required for this endpoint",
@@ -62,8 +78,21 @@ def get_current_user(
     # Create or get user from JWT payload
     try:
         user = user_service.get_or_create_user(db, auth_result)
+        logger.log_auth_event(
+            message="JWT authentication successful",
+            event_type="jwt_auth_success",
+            actor_subject=user.subject,
+            success=True
+        )
         return user
     except Exception as e:
+        logger.log_auth_event(
+            message="User creation failed during authentication",
+            event_type="user_creation_failed",
+            actor_subject=auth_result.get("subject", "unknown"),
+            success=False,
+            error=str(e)
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"User creation failed: {str(e)}",
@@ -87,6 +116,12 @@ def get_api_user(
     auth_result = auth_service.authenticate_request(auth_header)
 
     if not auth_result:
+        logger.log_auth_event(
+            message="API authentication failed - invalid credentials",
+            event_type="api_auth_failed",
+            success=False,
+            error="Invalid authentication credentials"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
@@ -95,6 +130,12 @@ def get_api_user(
 
     # Handle static API token authentication
     if auth_result.get("type") == "static_api":
+        logger.log_auth_event(
+            message="Static API token authentication successful",
+            event_type="static_api_auth_success",
+            actor_subject="system:api_client",
+            success=True
+        )
         return {
             "type": "static_api",
             "valid": True,
@@ -107,6 +148,13 @@ def get_api_user(
         user = user_service.get_or_create_user(db, auth_result)
         user_roles = user_service.get_user_roles(db, user)
 
+        logger.log_auth_event(
+            message="JWT API authentication successful",
+            event_type="jwt_api_auth_success",
+            actor_subject=user.subject,
+            success=True
+        )
+
         return {
             "type": "jwt",
             "user": user,
@@ -115,6 +163,13 @@ def get_api_user(
             "jwt_payload": auth_result,
         }
     except Exception as e:
+        logger.log_auth_event(
+            message="User authentication failed for API endpoint",
+            event_type="jwt_api_auth_failed",
+            actor_subject=auth_result.get("subject", "unknown"),
+            success=False,
+            error=str(e)
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"User authentication failed: {str(e)}",

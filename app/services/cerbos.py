@@ -412,3 +412,54 @@ class CerbosService(BaseService):
                 span.set_attribute("cerbos.policy_deleted", False)
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 raise
+
+    def health_check(self) -> bool:
+        """
+        Check Cerbos API health.
+        Returns True if Cerbos is reachable and responding.
+        """
+        with self.trace_operation("health_check", {
+            "cerbos.operation": "health_check"
+        }) as span:
+            try:
+                # Simple connectivity test - try to make a basic request to Cerbos
+                # In a real implementation, Cerbos might have a dedicated health endpoint
+                # For now, we'll test with a minimal check request
+                test_payload = {
+                    "requestId": "health-check",
+                    "principal": {
+                        "id": "health-check",
+                        "roles": [],
+                        "policyVersion": "default",
+                        "attr": {}
+                    },
+                    "resources": [{
+                        "resource": {
+                            "id": "health-check",
+                            "attr": {}
+                        },
+                        "actions": ["read"]
+                    }]
+                }
+
+                def _make_health_request():
+                    return requests.post(
+                        self.check_url,
+                        json=test_payload,
+                        timeout=5
+                    )
+
+                response = self._retry_with_backoff(_make_health_request)
+
+                # If we get any response (even denied), Cerbos is healthy
+                is_healthy = response.status_code in [200, 403]
+                span.set_attribute("cerbos.healthy", is_healthy)
+                span.set_attribute("http.status_code", response.status_code)
+
+                return is_healthy
+
+            except Exception as e:
+                span.record_exception(e)
+                span.set_attribute("cerbos.healthy", False)
+                span.set_attribute("cerbos.error", str(e))
+                return False
