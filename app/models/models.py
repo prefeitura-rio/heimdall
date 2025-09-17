@@ -41,6 +41,9 @@ class Action(Base):
     endpoints: Mapped[list["Endpoint"]] = relationship(
         "Endpoint", back_populates="action"
     )
+    role_actions: Mapped[list["RoleAction"]] = relationship(
+        "RoleAction", back_populates="action"
+    )
 
 
 class Role(Base):
@@ -64,6 +67,9 @@ class Role(Base):
     )
     user_roles: Mapped[list["UserRole"]] = relationship(
         "UserRole", back_populates="role"
+    )
+    role_actions: Mapped[list["RoleAction"]] = relationship(
+        "RoleAction", back_populates="role"
     )
 
 
@@ -332,6 +338,44 @@ class UserRole(Base):
     )
 
 
+class RoleAction(Base):
+    """Role actions table - maps roles to actions they can perform."""
+
+    __tablename__ = "role_actions"
+
+    # Performance indexes for role-action queries
+    __table_args__ = (
+        # Index for role_id lookups (get all actions for a role)
+        Index("ix_role_actions_role_id", "role_id"),
+        # Index for action_id lookups (get all roles with an action)
+        Index("ix_role_actions_action_id", "action_id"),
+        # Composite index for specific role-action checks
+        Index("ix_role_actions_role_action", "role_id", "action_id"),
+        # Index for granted_by auditing
+        Index("ix_role_actions_granted_by", "granted_by"),
+        # Index for chronological queries
+        Index("ix_role_actions_granted_at", "granted_at"),
+    )
+
+    role_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
+    )
+    action_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("actions.id", ondelete="CASCADE"), primary_key=True
+    )
+    granted_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # Relationships
+    role: Mapped[Role] = relationship("Role", back_populates="role_actions")
+    action: Mapped[Action] = relationship("Action", back_populates="role_actions")
+    granter: Mapped[User | None] = relationship("User")
+
+
 class GroupManagementRight(Base):
     """Group management rights table."""
 
@@ -417,4 +461,49 @@ class AdminAudit(Base):
     # Relationships
     actor_user: Mapped[User | None] = relationship(
         "User", back_populates="audit_entries"
+    )
+
+
+class FailedOperation(Base):
+    """Failed operations table - tracks operations that failed and need retry."""
+
+    __tablename__ = "failed_operations"
+
+    # Performance indexes for retry queries
+    __table_args__ = (
+        # Index for operation_type filtering (retry logic)
+        Index("ix_failed_operations_operation_type", "operation_type"),
+        # Index for status filtering (get pending retries)
+        Index("ix_failed_operations_status", "status"),
+        # Index for next_retry_at (scheduled retries)
+        Index("ix_failed_operations_next_retry_at", "next_retry_at"),
+        # Index for failed_at (chronological ordering)
+        Index("ix_failed_operations_failed_at", "failed_at"),
+        # Index for retry_count (exponential backoff)
+        Index("ix_failed_operations_retry_count", "retry_count"),
+        # Composite index for active retry queries
+        Index("ix_failed_operations_status_next_retry", "status", "next_retry_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    operation_type: Mapped[str] = mapped_column(String, nullable=False)
+    operation_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, nullable=False)
+    error_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_retries: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String, default="pending", nullable=False
+    )  # pending, retrying, failed, succeeded
+    failed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    succeeded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )

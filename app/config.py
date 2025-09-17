@@ -8,6 +8,10 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+import psycopg2
+import redis
+import requests
+
 from app.logging_config import get_structured_logger
 
 logger = get_structured_logger(__name__)
@@ -84,8 +88,7 @@ class Config:
         """Get list of required environment variables with descriptions."""
         return [
             ("DB_DSN", "PostgreSQL database connection string"),
-            ("CERBOS_CHECK_URL", "Cerbos Check API URL"),
-            ("CERBOS_ADMIN_URL", "Cerbos Admin API URL"),
+            ("CERBOS_BASE_URL", "Cerbos Base URL"),
             ("CERBOS_ADMIN_USER", "Cerbos Admin API username"),
             ("CERBOS_ADMIN_PASSWORD", "Cerbos Admin API password"),
             ("KEYCLOAK_JWKS_URL", "Keycloak JWKS endpoint URL"),
@@ -98,6 +101,7 @@ class Config:
     def _get_optional_variables(self) -> list[tuple[str, str, str]]:
         """Get list of optional environment variables with descriptions and defaults."""
         return [
+            ("KEYCLOAK_ADMIN_ROLE", "Keycloak client role name that grants superadmin privileges", "heimdall-admin"),
             ("REDIS_URL", "Redis connection URL", "redis://redis:6379/0"),
             ("REDIS_MAPPING_TTL", "Mapping cache TTL in seconds", "60"),
             ("REDIS_USER_ROLES_TTL", "User roles cache TTL in seconds", "30"),
@@ -113,7 +117,7 @@ class Config:
                 "heimdall-admin-service",
             ),
             ("OTEL_RESOURCE_ATTRIBUTES", "OpenTelemetry resource attributes", ""),
-            ("RECONCILE_INTERVAL_SECONDS", "Background reconciliation interval", "300"),
+            ("RECONCILE_INTERVAL_SECONDS", "Background reconciliation interval (with UUID change detection)", "2"),
             ("SYNC_RETRY_INTERVAL_SECONDS", "Sync retry interval", "60"),
             ("HOST", "Server host address", "0.0.0.0"),
             ("PORT", "Server port", "8080"),
@@ -141,8 +145,7 @@ class Config:
     def _validate_url_formats(self) -> None:
         """Validate URL format for URL environment variables."""
         url_variables = [
-            "CERBOS_CHECK_URL",
-            "CERBOS_ADMIN_URL",
+            "CERBOS_BASE_URL",
             "KEYCLOAK_JWKS_URL",
             "OTEL_EXPORTER_OTLP_ENDPOINT",
             "REDIS_URL",
@@ -174,10 +177,7 @@ class Config:
                         self.errors.append(
                             f"'{var_name}' must use redis:// scheme: {value}"
                         )
-                    if var_name in [
-                        "CERBOS_CHECK_URL",
-                        "CERBOS_ADMIN_URL",
-                    ] and parsed.scheme not in ["http", "https"]:
+                    if var_name == "CERBOS_BASE_URL" and parsed.scheme not in ["http", "https"]:
                         self.errors.append(
                             f"'{var_name}' must use http:// or https:// scheme: {value}"
                         )
@@ -298,7 +298,7 @@ class Config:
             ("REDIS_MAPPING_TTL", 1, 86400),  # 1 second to 1 day
             ("REDIS_USER_ROLES_TTL", 1, 3600),  # 1 second to 1 hour
             ("REDIS_JWKS_TTL", 60, 86400),  # 1 minute to 1 day
-            ("RECONCILE_INTERVAL_SECONDS", 60, 86400),  # 1 minute to 1 day
+            ("RECONCILE_INTERVAL_SECONDS", 1, 86400),  # 1 second to 1 day (UUID change detection allows very frequent checks)
             ("SYNC_RETRY_INTERVAL_SECONDS", 10, 3600),  # 10 seconds to 1 hour
             ("PORT", 1, 65535),  # Valid port range
         ]
@@ -354,16 +354,138 @@ class Config:
         Validate runtime connectivity to external services.
         Returns dict of service -> connectivity status.
         """
-        # This would be implemented to actually test connections
-        # For now, return placeholder
-        return {
-            "database": False,  # Would test DB_DSN connection
-            "redis": False,  # Would test REDIS_URL connection
-            "cerbos_check": False,  # Would test CERBOS_CHECK_URL
-            "cerbos_admin": False,  # Would test CERBOS_ADMIN_URL
-            "keycloak_jwks": False,  # Would test KEYCLOAK_JWKS_URL
-            "otel_collector": False,  # Would test OTEL_EXPORTER_OTLP_ENDPOINT
-        }
+        connectivity_status = {}
+
+        # Test database connection
+        connectivity_status["database"] = self._test_database_connection()
+
+        # Test Redis connection
+        connectivity_status["redis"] = self._test_redis_connection()
+
+        # Test Cerbos connection
+        connectivity_status["cerbos"] = self._test_cerbos_connection()
+
+        # Test Keycloak JWKS endpoint
+        connectivity_status["keycloak_jwks"] = self._test_keycloak_jwks_connection()
+
+        # Test OTEL collector (if configured)
+        connectivity_status["otel_collector"] = self._test_otel_connection()
+
+        return connectivity_status
+
+    def _test_database_connection(self) -> bool:
+        """Test PostgreSQL database connectivity."""
+        try:
+            db_dsn = os.getenv("DB_DSN")
+            if not db_dsn:
+                return False
+
+            # Parse DSN and test connection
+            conn = psycopg2.connect(db_dsn)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            cursor.close()
+            conn.close()
+            return True
+
+        except Exception as e:
+            logger.log_operation(
+                level=30,  # WARNING
+                message="Database connectivity test failed",
+                operation="connectivity_test_database",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
+            return False
+
+    def _test_redis_connection(self) -> bool:
+        """Test Redis connectivity."""
+        try:
+            redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+            # Create Redis client and test connection
+            r = redis.from_url(redis_url)
+            r.ping()
+            r.close()
+            return True
+
+        except Exception as e:
+            logger.log_operation(
+                level=30,  # WARNING
+                message="Redis connectivity test failed",
+                operation="connectivity_test_redis",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
+            return False
+
+    def _test_cerbos_connection(self) -> bool:
+        """Test Cerbos connectivity."""
+        try:
+            cerbos_base_url = os.getenv("CERBOS_BASE_URL")
+            if not cerbos_base_url:
+                return False
+
+            # Test Cerbos health endpoint
+            health_url = f"{cerbos_base_url.rstrip('/')}/api/cerbos/version"
+            response = requests.get(health_url, timeout=5)
+            response.raise_for_status()
+            return True
+
+        except Exception as e:
+            logger.log_operation(
+                level=30,  # WARNING
+                message="Cerbos connectivity test failed",
+                operation="connectivity_test_cerbos",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
+            return False
+
+    def _test_keycloak_jwks_connection(self) -> bool:
+        """Test Keycloak JWKS endpoint connectivity."""
+        try:
+            jwks_url = os.getenv("KEYCLOAK_JWKS_URL")
+            if not jwks_url:
+                return False
+
+            # Test JWKS endpoint
+            response = requests.get(jwks_url, timeout=5)
+            response.raise_for_status()
+
+            # Verify it returns valid JSON with keys
+            jwks_data = response.json()
+            return "keys" in jwks_data
+
+        except Exception as e:
+            logger.log_operation(
+                level=30,  # WARNING
+                message="Keycloak JWKS connectivity test failed",
+                operation="connectivity_test_keycloak_jwks",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
+            return False
+
+    def _test_otel_connection(self) -> bool:
+        """Test OpenTelemetry collector connectivity."""
+        try:
+            otel_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+            if not otel_endpoint:
+                # OTEL is optional, so return True if not configured
+                return True
+
+            # Test OTEL collector endpoint (usually HTTP)
+            # Note: This is a basic connectivity test, not a full OTLP export
+            response = requests.get(otel_endpoint, timeout=5)
+            # Don't raise_for_status() as OTEL endpoints may return different codes
+            return response.status_code < 500
+
+        except Exception as e:
+            logger.log_operation(
+                level=30,  # WARNING
+                message="OTEL collector connectivity test failed",
+                operation="connectivity_test_otel",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
+            return False
 
 
 # Global configuration instance

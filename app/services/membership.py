@@ -130,6 +130,7 @@ class MembershipService(BaseService):
                     db_span.set_attribute("membership.user_id", user.id)
 
                 # Step 3: Update Cerbos policies
+                policy_pushed = False  # Initialize to handle exception cases
                 with self.tracer.start_span("update_cerbos_policies") as policy_span:
                     try:
                         # Get user's updated roles after membership addition
@@ -330,6 +331,97 @@ class MembershipService(BaseService):
                         "group_name": group_name,
                         "member_subject": member_subject,
                     },
+                    result={"error": str(e)},
+                    success=False,
+                )
+                raise
+
+    def list_group_members(
+        self,
+        db: Session,
+        group_name: str,
+        caller_subject: str,
+        caller_roles: list[str],
+    ) -> list[Membership]:
+        """List all members of a group with permission check."""
+        with self.trace_operation(
+            "list_group_members",
+            {
+                "membership.group_name": group_name,
+                "membership.caller_subject": caller_subject,
+                "membership.operation": "list_members",
+            },
+        ) as span:
+            try:
+                # Step 1: Check permissions with Cerbos
+                with self.tracer.start_span("check_view_members_permission") as perm_span:
+                    perm_span.set_attribute("cerbos.action", "group:view_members")
+                    perm_span.set_attribute("cerbos.resource", group_name)
+
+                    can_view = self.cerbos_service.check_permission(
+                        caller_subject=caller_subject,
+                        caller_roles=caller_roles,
+                        action="group:view_members",
+                        resource_type="group",
+                        resource_attrs={"name": group_name},
+                    )
+
+                    perm_span.set_attribute("cerbos.allowed", can_view)
+
+                    if not can_view:
+                        perm_span.set_attribute("membership.permission_denied", True)
+                        raise PermissionError(f"Permission denied to view members of group '{group_name}'")
+
+                # Step 2: Find the group
+                with self.tracer.start_span("find_group") as group_span:
+                    group = db.query(Group).filter(Group.name == group_name).first()
+                    if not group:
+                        group_span.set_attribute("group.found", False)
+                        raise ValueError(f"Group '{group_name}' not found")
+
+                    group_span.set_attribute("group.found", True)
+                    group_span.set_attribute("group.id", group.id)
+
+                # Step 3: Get all memberships for this group, sorted by join date (newest first)
+                with self.tracer.start_span("get_memberships") as members_span:
+                    memberships = (
+                        db.query(Membership)
+                        .filter(Membership.group_id == group.id)
+                        .order_by(Membership.granted_at.desc())
+                        .all()
+                    )
+
+                    members_span.set_attribute("membership.count", len(memberships))
+
+                # Log successful listing
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=caller_subject,
+                    operation="list_members",
+                    target_type="group",
+                    target_id=group_name,
+                    request_payload={"group_name": group_name},
+                    result={"members_count": len(memberships)},
+                    success=True,
+                )
+
+                span.set_attribute("membership.members_count", len(memberships))
+                span.set_attribute("membership.listed", True)
+                return memberships
+
+            except Exception as e:
+                span.record_exception(e)
+                span.set_attribute("membership.error", str(e))
+                span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+
+                # Log failed listing attempt
+                self.audit_service.safe_log_operation(
+                    db=db,
+                    actor_subject=caller_subject,
+                    operation="list_members",
+                    target_type="group",
+                    target_id=group_name,
+                    request_payload={"group_name": group_name},
                     result={"error": str(e)},
                     success=False,
                 )

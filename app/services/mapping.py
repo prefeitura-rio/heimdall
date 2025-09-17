@@ -144,7 +144,7 @@ class MappingService(BaseService):
                 if not action:
                     span.set_attribute("mapping.action_not_found", True)
                     raise ValueError(f"Action with ID {action_id} not found")
-                
+
                 span.set_attribute("mapping.action_name", action.name)
 
                 # Check if mapping already exists
@@ -221,9 +221,9 @@ class MappingService(BaseService):
                 try:
                     if 'action' in locals():
                         action_name = action.name
-                except:
+                except Exception:
                     pass
-                
+
                 self.audit_service.safe_log_operation(
                     db=db,
                     actor_subject=created_by.subject,
@@ -356,9 +356,9 @@ class MappingService(BaseService):
                 try:
                     if 'action' in locals():
                         action_name = action.name
-                except:
+                except Exception:
                     pass
-                
+
                 self.audit_service.safe_log_operation(
                     db=db,
                     actor_subject=updated_by.subject,
@@ -480,7 +480,18 @@ class MappingService(BaseService):
         - * for any characters within a path segment
         - ** for any path segments
         - :param for named parameters
+        - Raw regex patterns with parentheses for capture groups
         """
+        # Check if this looks like a raw regex pattern (contains unescaped parentheses)
+        if '(' in path_pattern and ')' in path_pattern:
+            # Treat as raw regex, just ensure anchors
+            pattern = path_pattern
+            if not pattern.startswith("^"):
+                pattern = "^" + pattern
+            if not pattern.endswith("$"):
+                pattern = pattern + "$"
+            return pattern
+
         # Escape special regex characters except *, ?, and :
         pattern = re.escape(path_pattern)
 

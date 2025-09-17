@@ -5,23 +5,44 @@ Implements OpenTelemetry tracing setup as specified in SPEC.md Section 6.
 
 import time
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
 from opentelemetry import trace
 
 # Load environment variables from .env file before importing app modules
-from dotenv import load_dotenv
-
 load_dotenv()
 
+# Import app modules after load_dotenv() to ensure environment is set
+from app.background_tasks import BackgroundTaskService  # noqa: E402
 from app.config import validate_environment  # noqa: E402
-from app.database import engine
-from app.logging_config import get_structured_logger, setup_structured_logging
-from app.routers import actions, groups, health, mappings, memberships, roles, users
-from app.services.database_monitor import setup_database_monitoring
-from app.tracing import instrument_fastapi, instrument_sqlalchemy, setup_tracing
+from app.database import engine  # noqa: E402
+from app.exceptions import CerbosUnavailableError  # noqa: E402
+from app.logging_config import (  # noqa: E402
+    get_structured_logger,
+    setup_structured_logging,
+)
+from app.routers import (  # noqa: E402
+    actions,
+    groups,
+    health,
+    mappings,
+    memberships,
+    roles,
+    users,
+)
+from app.services.cerbos import CerbosService  # noqa: E402
+from app.services.database_monitor import setup_database_monitoring  # noqa: E402
+from app.services.health_monitor import HealthMonitor  # noqa: E402
+from app.tracing import (  # noqa: E402
+    instrument_fastapi,
+    instrument_sqlalchemy,
+    setup_tracing,
+)
 
 # Initialize OpenTelemetry tracing before creating the FastAPI app (optional)
 tracing_enabled = setup_tracing()
@@ -64,13 +85,108 @@ except Exception as e:
     )
     raise
 
+# Initialize Cerbos policy setup
+def setup_cerbos_policies():
+    """Setup required Cerbos policies at application startup."""
+    cerbos_service = CerbosService()
+
+    # Try to ensure superadmin policy exists
+    policy_created = cerbos_service.ensure_superadmin_policy()
+
+    if policy_created:
+        logger.log_operation(
+            level=20,  # INFO
+            message="Superadmin Cerbos policy created successfully",
+            operation="cerbos_policy_setup",
+            extra_fields={"policy_type": "superadmin", "status": "created"}
+        )
+    else:
+        # Get policy template for manual application
+        policy_template = cerbos_service.get_superadmin_policy_template()
+
+        logger.log_operation(
+            level=30,  # WARNING
+            message="Could not create superadmin Cerbos policy automatically. Manual configuration required.",
+            operation="cerbos_policy_setup",
+            extra_fields={
+                "policy_type": "superadmin",
+                "status": "manual_required",
+                "instructions": "Cerbos admin API is disabled. Apply the policy template manually.",
+                "policy_template": policy_template
+            }
+        )
+
+# Setup Cerbos policies
+setup_cerbos_policies()
+
+# Lifespan context manager for startup/shutdown events
+from contextlib import asynccontextmanager  # noqa: E402
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup
+    logger.log_operation(
+        level=20,  # INFO
+        message="Starting background services",
+        operation="startup_background_services",
+    )
+
+    # Start health monitoring
+    health_monitor.start_monitoring()
+
+    # Start background task scheduler
+    await background_task_service.start_background_tasks()
+
+    yield
+
+    # Shutdown
+    logger.log_operation(
+        level=20,  # INFO
+        message="Stopping background services",
+        operation="shutdown_background_services",
+    )
+
+    # Stop background task scheduler
+    await background_task_service.stop_background_tasks()
+
+    # Stop health monitoring
+    await health_monitor.stop_monitoring()
+
+
 # Create FastAPI application
 app = FastAPI(
     title="Heimdall Admin Service",
-    description="Admin service for group and role management with Cerbos integration",
+    lifespan=lifespan,
+    description="""
+# Heimdall Admin Service API
+
+A comprehensive admin service for user and group management with authorization powered by Cerbos.
+
+## Features
+
+- **User Management**: Automatic user creation from JWT tokens with role-based access control
+- **Group Management**: Create, manage, and assign users to groups with hierarchical permissions
+- **Role Management**: Define and assign roles to users and groups
+- **Mapping Management**: Configure API endpoint to action mappings for authorization
+- **Action Management**: Define available actions for fine-grained permission control
+- **Cerbos Integration**: Policy-based authorization with external Cerbos service
+- **Audit Logging**: Comprehensive audit trail for all administrative operations
+- **Redis Caching**: High-performance caching for frequently accessed data
+    """.strip(),
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    contact={
+        "name": "Heimdall Admin Service",
+        "url": "https://github.com/your-org/heimdall",
+        "email": "admin@yourorg.com"
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
 )
 
 # Add CORS middleware if needed
@@ -125,6 +241,12 @@ instrument_sqlalchemy(engine)
 
 # Setup database performance monitoring
 setup_database_monitoring(engine)
+
+# Initialize health monitor
+health_monitor = HealthMonitor()
+
+# Initialize background task service
+background_task_service = BackgroundTaskService()
 
 
 # Global exception handlers
@@ -185,6 +307,42 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         )
 
 
+@app.exception_handler(CerbosUnavailableError)
+async def cerbos_unavailable_handler(request: Request, exc: CerbosUnavailableError):
+    """Handle Cerbos service unavailable errors with 503 status."""
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_span("cerbos_unavailable_handler") as span:
+        span.set_attribute("http.status_code", 503)
+        span.set_attribute("error.type", "CerbosUnavailableError")
+        span.set_attribute("error.service", exc.service_name)
+        span.set_attribute("http.method", request.method)
+        span.set_attribute("http.url", str(request.url))
+        span.record_exception(exc)
+
+        logger.log_operation(
+            level=40,  # WARNING level - service dependency issue, not application error
+            message="Authorization service unavailable",
+            operation="service_unavailable",
+            extra_fields={
+                "service_name": exc.service_name,
+                "exception_type": "CerbosUnavailableError",
+                "method": request.method,
+                "url": str(request.url),
+                "original_error": str(exc.original_error) if exc.original_error else None,
+            },
+        )
+
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": "Authorization service temporarily unavailable",
+                "status_code": 503,
+                "service": exc.service_name,
+                "retry_after": "Please try again in a few moments"
+            },
+        )
+
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions."""
@@ -215,6 +373,64 @@ async def general_exception_handler(request: Request, exc: Exception):
             content={"error": "Internal server error", "status_code": 500},
         )
 
+
+# Security scheme for JWT authentication
+security = HTTPBearer(
+    scheme_name="JWT Bearer",
+    description="JWT token from Keycloak. Format: Bearer <token>"
+)
+
+# Custom OpenAPI schema configuration
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+    # FastAPI automatically generates security schemes from HTTPBearer dependencies
+    # No manual security scheme configuration needed
+
+    # Add tags with descriptions
+    openapi_schema["tags"] = [
+        {
+            "name": "health",
+            "description": "Service health and readiness checks"
+        },
+        {
+            "name": "users",
+            "description": "User management operations. Users are automatically created from JWT tokens."
+        },
+        {
+            "name": "groups",
+            "description": "Group management operations. Groups organize users and can have roles assigned."
+        },
+        {
+            "name": "memberships",
+            "description": "Group membership management. Assign and remove users from groups."
+        },
+        {
+            "name": "roles",
+            "description": "Role management operations. Roles define permissions that can be assigned to users or groups."
+        },
+        {
+            "name": "actions",
+            "description": "Action management operations. Actions define the granular permissions available in the system."
+        },
+        {
+            "name": "mappings",
+            "description": "API endpoint to action mapping configuration. Maps HTTP endpoints to authorization actions."
+        }
+    ]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 # Router registration
 app.include_router(health.router, tags=["health"])

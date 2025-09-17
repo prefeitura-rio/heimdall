@@ -20,6 +20,7 @@ class UserService(BaseService):
     def __init__(self):
         super().__init__("user")
         self.keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "superapp")
+        self.admin_role_name = os.getenv("KEYCLOAK_ADMIN_ROLE", "heimdall-admin")
         self.cache_service = CacheService()
 
     def get_or_create_user(self, db: Session, jwt_payload: dict[str, Any]) -> User:
@@ -66,7 +67,7 @@ class UserService(BaseService):
                 db.commit()
                 db.refresh(user)
 
-                # Check and assign superadmin role if user has heimdall-admin
+                # Check and assign superadmin role if user has admin role
                 self._ensure_superadmin_role(db, user, jwt_payload, span)
 
                 span.set_attribute("user.created_new", True)
@@ -101,20 +102,20 @@ class UserService(BaseService):
         self, db: Session, user: User, jwt_payload: dict[str, Any], span: trace.Span
     ) -> None:
         """
-        Check if user has heimdall-admin client role and automatically assign superadmin role.
+        Check if user has admin client role and automatically assign superadmin role.
         Implements automatic role assignment as specified in SPEC.md Section 3.1.
         """
         try:
-            # Check if user has heimdall-admin role in resource_access
-            has_heimdall_admin = self._has_heimdall_admin_role(jwt_payload)
-            span.set_attribute("user.has_heimdall_admin", has_heimdall_admin)
+            # Check if user has admin role in resource_access
+            has_admin_role = self._has_admin_role(jwt_payload)
+            span.set_attribute("user.has_admin_role", has_admin_role)
 
-            if not has_heimdall_admin:
-                # User doesn't have heimdall-admin role, check if they have superadmin and remove it
+            if not has_admin_role:
+                # User doesn't have admin role, check if they have superadmin and remove it
                 self._remove_superadmin_if_exists(db, user, span)
                 return
 
-            # User has heimdall-admin role, ensure they have superadmin
+            # User has admin role, ensure they have superadmin
             existing_superadmin = (
                 db.query(UserRole)
                 .join(Role)
@@ -159,18 +160,18 @@ class UserService(BaseService):
             # Don't fail user creation if role assignment fails
             db.rollback()
 
-    def _has_heimdall_admin_role(self, jwt_payload: dict[str, Any]) -> bool:
-        """Check if user has heimdall-admin role in Keycloak client roles."""
+    def _has_admin_role(self, jwt_payload: dict[str, Any]) -> bool:
+        """Check if user has admin role in Keycloak client roles."""
         resource_access = jwt_payload.get("resource_access", {})
         client_access = resource_access.get(self.keycloak_client_id, {})
         client_roles = client_access.get("roles", [])
 
-        return "heimdall-admin" in client_roles
+        return self.admin_role_name in client_roles
 
     def _remove_superadmin_if_exists(
         self, db: Session, user: User, span: trace.Span
     ) -> None:
-        """Remove superadmin role if user no longer has heimdall-admin role."""
+        """Remove superadmin role if user no longer has admin role."""
         try:
             existing_superadmin = (
                 db.query(UserRole)

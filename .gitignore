@@ -66,3 +66,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Sandbox directory for toy scripts
+sandbox/

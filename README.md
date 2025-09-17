@@ -101,12 +101,12 @@ All configuration is done via environment variables. Copy [`.env.example`](.env.
 | **Authentication** |
 | `KEYCLOAK_JWKS_URL` | ✅ | - | Keycloak JWKS endpoint URL for JWT verification |
 | `KEYCLOAK_CLIENT_ID` | ✅ | - | Keycloak client ID for role extraction |
+| `KEYCLOAK_ADMIN_ROLE` | ❌ | `heimdall-admin` | Keycloak client role name that grants superadmin privileges |
 | `JWT_ALGORITHM` | ✅ | - | JWT signature algorithm (typically `RS256`) |
 | `JWT_AUDIENCE` | ✅ | - | JWT audience claim (typically `account`) |
 | `STATIC_API_TOKEN` | ✅ | - | Static API token for service-to-service communication |
 | **Authorization** |
-| `CERBOS_CHECK_URL` | ✅ | - | Cerbos Check API URL |
-| `CERBOS_ADMIN_URL` | ✅ | - | Cerbos Admin API URL |
+| `CERBOS_BASE_URL` | ✅ | - | Cerbos Base URL |
 | `CERBOS_ADMIN_USER` | ✅ | - | Cerbos Admin API username |
 | `CERBOS_ADMIN_PASSWORD` | ✅ | - | Cerbos Admin API password |
 | **Caching** |
@@ -133,8 +133,7 @@ cp .env.example .env
 
 # For local development with default services:
 DB_DSN=postgresql://heimdall:heimdall@localhost:5432/heimdall
-CERBOS_CHECK_URL=http://localhost:3593/api/check
-CERBOS_ADMIN_URL=http://localhost:3593/api/admin
+CERBOS_BASE_URL=http://localhost:3593
 CERBOS_ADMIN_USER=admin
 CERBOS_ADMIN_PASSWORD=password
 KEYCLOAK_JWKS_URL=https://your-keycloak.com/realms/your-realm/protocol/openid-connect/certs
@@ -379,10 +378,10 @@ psql $POSTGRES_URL -c "SELECT 1;"
 **Cerbos Connection Issues**
 ```bash
 # Verify Cerbos is accessible
-curl $CERBOS_CHECK_URL/healthz
+curl $CERBOS_BASE_URL/api/healthz
 
 # Check admin credentials
-curl -u $CERBOS_ADMIN_USER:$CERBOS_ADMIN_PASSWORD $CERBOS_ADMIN_URL/policies
+curl -u $CERBOS_ADMIN_USER:$CERBOS_ADMIN_PASSWORD $CERBOS_BASE_URL/api/admin/policies
 ```
 
 **JWT Authentication Problems**

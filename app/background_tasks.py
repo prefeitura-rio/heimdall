@@ -7,26 +7,30 @@ import asyncio
 import os
 import signal
 import sys
+from datetime import datetime, timedelta
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from dotenv import load_dotenv
 from opentelemetry import trace
 
 # Load environment variables from .env file before importing app modules
-from dotenv import load_dotenv
-
 load_dotenv()
 
-from app.config import validate_environment
-from app.database import get_db_session
-from app.logging_config import get_structured_logger, setup_structured_logging
-from app.models import User
-from app.services.audit import AuditService
-from app.services.base import BaseService
-from app.services.cerbos import CerbosService
-from app.services.user import UserService
-from app.tracing import setup_tracing
+# Import app modules after load_dotenv() to ensure environment is set
+from app.config import validate_environment  # noqa: E402
+from app.database import get_db_session  # noqa: E402
+from app.logging_config import (  # noqa: E402
+    get_structured_logger,
+    setup_structured_logging,
+)
+from app.models import FailedOperation, User  # noqa: E402
+from app.services.audit import AuditService  # noqa: E402
+from app.services.base import BaseService  # noqa: E402
+from app.services.cerbos import CerbosService  # noqa: E402
+from app.services.user import UserService  # noqa: E402
+from app.tracing import setup_tracing  # noqa: E402
 
 # Configure structured logging
 setup_structured_logging()
@@ -54,9 +58,13 @@ class BackgroundTaskService(BaseService):
         # Shutdown flag
         self.shutdown_requested = False
 
+        # Track last known policy version for efficient change detection
+        self.last_known_policy_version = None
+
     async def reconcile_cerbos_policies(self) -> None:
         """
         Reconciliation task that walks all users and ensures Cerbos policies reflect DB state.
+        Uses change detection to only sync when policy-relevant data has changed.
         Implements reconciliation as specified in SPEC.md Section 3.6.
         """
         with self.trace_operation(
@@ -71,9 +79,34 @@ class BackgroundTaskService(BaseService):
                 )
 
                 # Get database session
-                session = next(get_db_session())
+                session = get_db_session()
 
                 try:
+                    # Check if policy version has changed (much more efficient than hash-based approach)
+                    from app.services.policy_version_tracker import PolicyVersionTracker
+                    version_tracker = PolicyVersionTracker()
+
+                    # Ensure settings table exists
+                    version_tracker.create_settings_table_if_not_exists(session)
+
+                    has_changed = version_tracker.has_version_changed(session, self.last_known_policy_version)
+                    span.set_attribute("reconciliation.version_changed", has_changed)
+
+                    if not has_changed:
+                        logger.log_operation(
+                            level=20,  # INFO
+                            message="No policy version changes detected, skipping reconciliation",
+                            operation="reconcile_skipped",
+                        )
+                        span.set_attribute("reconciliation.skipped", True)
+                        return
+
+                    logger.log_operation(
+                        level=20,  # INFO
+                        message="Policy version changes detected, starting full reconciliation",
+                        operation="reconcile_changes_detected",
+                    )
+
                     # Get all users from database
                     users = session.query(User).all()
                     span.set_attribute("reconciliation.total_users", len(users))
@@ -158,6 +191,31 @@ class BackgroundTaskService(BaseService):
                         },
                     )
 
+                    # Update last known version if reconciliation was successful (no failures)
+                    if users_failed == 0:
+                        try:
+                            current_version = version_tracker.get_current_version(session)
+                            self.last_known_policy_version = current_version
+                            span.set_attribute("reconciliation.version_updated", True)
+                            logger.log_operation(
+                                level=20,  # INFO
+                                message=f"Policy version marked as synced: {current_version[:8]}",
+                                operation="reconcile_version_synced",
+                            )
+                        except Exception as version_error:
+                            logger.log_operation(
+                                level=30,  # WARNING
+                                message="Error updating synced policy version",
+                                operation="reconcile_version_error",
+                                extra_fields={"error": str(version_error)},
+                            )
+                    else:
+                        logger.log_operation(
+                            level=30,  # WARNING
+                            message="Reconciliation had failures, not updating version",
+                            operation="reconcile_had_failures",
+                        )
+
                 finally:
                     session.close()
 
@@ -188,19 +246,115 @@ class BackgroundTaskService(BaseService):
                 )
 
                 # Get database session
-                session = next(get_db_session())
+                session = get_db_session()
 
                 try:
-                    # For now, this is a placeholder implementation
-                    # In a full implementation, this would:
-                    # 1. Query a failed_operations table for pending retries
-                    # 2. Implement exponential backoff logic
-                    # 3. Retry failed Cerbos API calls
-                    # 4. Update retry counts and mark permanently failed operations
+                    # Query failed operations that are ready for retry
+                    now = datetime.utcnow()
+                    failed_operations = (
+                        session.query(FailedOperation)
+                        .filter(
+                            FailedOperation.status.in_(["pending", "retrying"]),
+                            FailedOperation.retry_count < FailedOperation.max_retries,
+                            (FailedOperation.next_retry_at.is_(None)) |
+                            (FailedOperation.next_retry_at <= now)
+                        )
+                        .order_by(FailedOperation.failed_at)
+                        .limit(50)  # Process max 50 operations per run
+                        .all()
+                    )
 
-                    span.set_attribute("sync_retry.operations_found", 0)
-                    span.set_attribute("sync_retry.operations_retried", 0)
-                    span.set_attribute("sync_retry.operations_succeeded", 0)
+                    operations_found = len(failed_operations)
+                    operations_retried = 0
+                    operations_succeeded = 0
+                    operations_permanently_failed = 0
+
+                    span.set_attribute("sync_retry.operations_found", operations_found)
+
+                    for failed_op in failed_operations:
+                        try:
+                            # Update status to retrying
+                            failed_op.status = "retrying"
+                            failed_op.last_attempted_at = now
+                            failed_op.retry_count += 1
+                            session.commit()
+
+                            # Perform the retry based on operation type
+                            success = await self._retry_operation(failed_op, session)
+                            operations_retried += 1
+
+                            if success:
+                                # Mark as succeeded
+                                failed_op.status = "succeeded"
+                                failed_op.succeeded_at = now
+                                operations_succeeded += 1
+                                logger.log_operation(
+                                    level=20,  # INFO
+                                    message="Failed operation retry succeeded",
+                                    operation="retry_operation_success",
+                                    extra_fields={
+                                        "operation_id": failed_op.id,
+                                        "operation_type": failed_op.operation_type,
+                                        "retry_count": failed_op.retry_count,
+                                    },
+                                )
+                            else:
+                                # Calculate next retry time with exponential backoff
+                                if failed_op.retry_count >= failed_op.max_retries:
+                                    # Mark as permanently failed
+                                    failed_op.status = "failed"
+                                    operations_permanently_failed += 1
+                                    logger.log_operation(
+                                        level=40,  # ERROR
+                                        message="Failed operation permanently failed after max retries",
+                                        operation="retry_operation_max_retries",
+                                        extra_fields={
+                                            "operation_id": failed_op.id,
+                                            "operation_type": failed_op.operation_type,
+                                            "retry_count": failed_op.retry_count,
+                                            "max_retries": failed_op.max_retries,
+                                        },
+                                    )
+                                else:
+                                    # Schedule next retry with exponential backoff
+                                    backoff_seconds = min(
+                                        300,  # Max 5 minutes
+                                        30 * (2 ** (failed_op.retry_count - 1))
+                                    )
+                                    failed_op.next_retry_at = now + timedelta(seconds=backoff_seconds)
+                                    failed_op.status = "pending"
+                                    logger.log_operation(
+                                        level=30,  # WARNING
+                                        message="Failed operation retry failed, scheduled for retry",
+                                        operation="retry_operation_failed",
+                                        extra_fields={
+                                            "operation_id": failed_op.id,
+                                            "operation_type": failed_op.operation_type,
+                                            "retry_count": failed_op.retry_count,
+                                            "next_retry_in_seconds": backoff_seconds,
+                                        },
+                                    )
+
+                            session.commit()
+
+                        except Exception as retry_error:
+                            session.rollback()
+                            logger.log_operation(
+                                level=50,  # ERROR
+                                message="Error during operation retry",
+                                operation="retry_operation_error",
+                                extra_fields={
+                                    "operation_id": failed_op.id,
+                                    "operation_type": failed_op.operation_type,
+                                    "error": str(retry_error),
+                                    "exception_type": type(retry_error).__name__,
+                                },
+                            )
+                            span.record_exception(retry_error)
+
+                    span.set_attribute("sync_retry.operations_retried", operations_retried)
+                    span.set_attribute("sync_retry.operations_succeeded", operations_succeeded)
+                    span.set_attribute("sync_retry.operations_permanently_failed", operations_permanently_failed)
 
                     # Audit the sync retry operation
                     self.audit_service.safe_log_operation(
@@ -211,18 +365,24 @@ class BackgroundTaskService(BaseService):
                         target_id="failed_syncs",
                         request_payload={"interval_seconds": self.sync_retry_interval},
                         result={
-                            "operations_found": 0,
-                            "operations_retried": 0,
-                            "operations_succeeded": 0,
+                            "operations_found": operations_found,
+                            "operations_retried": operations_retried,
+                            "operations_succeeded": operations_succeeded,
+                            "operations_permanently_failed": operations_permanently_failed,
                         },
                         success=True,
                     )
 
                     logger.log_operation(
                         level=20,  # INFO
-                        message="Sync retry completed: no failed operations found",
+                        message="Sync retry completed",
                         operation="sync_retry_complete",
-                        extra_fields={"failed_operations_found": 0},
+                        extra_fields={
+                            "operations_found": operations_found,
+                            "operations_retried": operations_retried,
+                            "operations_succeeded": operations_succeeded,
+                            "operations_permanently_failed": operations_permanently_failed,
+                        },
                     )
 
                 finally:
@@ -352,6 +512,123 @@ class BackgroundTaskService(BaseService):
                 message="Background tasks service stopped",
                 operation="service_stopped",
             )
+
+    async def start_background_tasks(self) -> None:
+        """Start background tasks for FastAPI application."""
+        try:
+            logger.log_operation(
+                level=20,  # INFO
+                message="Starting background tasks scheduler",
+                operation="scheduler_start",
+            )
+
+            # Setup and start scheduler
+            self.setup_scheduler()
+            self.scheduler.start()
+
+            logger.log_operation(
+                level=20,  # INFO
+                message="Background tasks scheduler started successfully",
+                operation="scheduler_started",
+            )
+
+        except Exception as e:
+            logger.log_operation(
+                level=50,  # ERROR
+                message="Failed to start background tasks scheduler",
+                operation="scheduler_start_error",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
+            raise
+
+    async def stop_background_tasks(self) -> None:
+        """Stop background tasks for FastAPI application."""
+        try:
+            logger.log_operation(
+                level=20,  # INFO
+                message="Stopping background tasks scheduler",
+                operation="scheduler_stop",
+            )
+
+            if hasattr(self, 'scheduler') and self.scheduler:
+                self.scheduler.shutdown(wait=False)
+
+            logger.log_operation(
+                level=20,  # INFO
+                message="Background tasks scheduler stopped successfully",
+                operation="scheduler_stopped",
+            )
+
+        except Exception as e:
+            logger.log_operation(
+                level=50,  # ERROR
+                message="Failed to stop background tasks scheduler",
+                operation="scheduler_stop_error",
+                extra_fields={"error": str(e), "exception_type": type(e).__name__},
+            )
+
+    async def _retry_operation(self, failed_op: FailedOperation, session) -> bool:
+        """
+        Retry a failed operation based on its type.
+        Returns True if the operation succeeded, False otherwise.
+        """
+        operation_type = failed_op.operation_type
+        operation_data = failed_op.operation_data
+
+        try:
+            if operation_type == "cerbos_policy_push":
+                # Retry pushing user policy to Cerbos
+                return self.cerbos_service.push_user_policy(
+                    user_subject=operation_data["user_subject"],
+                    user_roles=operation_data["user_roles"]
+                )
+
+            elif operation_type == "cerbos_policy_delete":
+                # Retry deleting user policy from Cerbos
+                return self.cerbos_service.delete_user_policy(
+                    user_subject=operation_data["user_subject"]
+                )
+
+            elif operation_type == "user_policy_sync":
+                # Retry full user policy synchronization
+                user_id = operation_data["user_id"]
+                user = session.query(User).filter(User.id == user_id).first()
+                if user:
+                    user_roles = self.user_service.get_user_roles(session, user)
+                    if user_roles:
+                        return self.cerbos_service.push_user_policy(
+                            user_subject=user.subject,
+                            user_roles=user_roles
+                        )
+                    else:
+                        return self.cerbos_service.delete_user_policy(user.subject)
+                return False
+
+            else:
+                logger.log_operation(
+                    level=40,  # ERROR
+                    message="Unknown operation type for retry",
+                    operation="retry_unknown_operation",
+                    extra_fields={
+                        "operation_id": failed_op.id,
+                        "operation_type": operation_type,
+                    },
+                )
+                return False
+
+        except Exception as e:
+            logger.log_operation(
+                level=50,  # ERROR
+                message="Exception during operation retry",
+                operation="retry_operation_exception",
+                extra_fields={
+                    "operation_id": failed_op.id,
+                    "operation_type": operation_type,
+                    "error": str(e),
+                    "exception_type": type(e).__name__,
+                },
+            )
+            return False
 
 
 async def main() -> None:
