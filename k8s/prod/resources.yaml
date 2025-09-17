@@ -29,6 +29,7 @@ spec:
       initContainers:
         - name: migrations
           image: ghcr.io/prefeitura-rio/heimdall:stable
+          workingDir: /app
           command: ["uv", "run", "alembic", "upgrade", "head"]
           envFrom:
             - secretRef:
