@@ -11,8 +11,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.logging_config import get_structured_logger
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
+
+logger = get_structured_logger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["health"])
 
@@ -132,19 +135,51 @@ async def readiness_check(
         # Simple query to test database connection
         db.execute(text("SELECT 1")).scalar()
         checks["database"] = True
+        logger.log_operation(
+            level=10,  # DEBUG
+            message="Database readiness check passed",
+            operation="readiness_check_database",
+        )
     except Exception as e:
         checks["database"] = False
-        errors.append(f"Database check failed: {str(e)}")
+        error_msg = f"Database check failed: {str(e)}"
+        errors.append(error_msg)
+        logger.log_operation(
+            level=40,  # ERROR
+            message="Database readiness check failed",
+            operation="readiness_check_database",
+            extra_fields={"error": str(e), "exception_type": type(e).__name__},
+        )
 
     # Redis cache connectivity check
     try:
         cache_healthy = cache_service.health_check()
         checks["cache"] = cache_healthy
         if not cache_healthy:
-            errors.append("Cache health check failed")
+            error_msg = "Cache health check failed"
+            errors.append(error_msg)
+            logger.log_operation(
+                level=40,  # ERROR
+                message="Redis cache readiness check failed",
+                operation="readiness_check_cache",
+                extra_fields={"cache_healthy": cache_healthy},
+            )
+        else:
+            logger.log_operation(
+                level=10,  # DEBUG
+                message="Redis cache readiness check passed",
+                operation="readiness_check_cache",
+            )
     except Exception as e:
         checks["cache"] = False
-        errors.append(f"Cache check failed: {str(e)}")
+        error_msg = f"Cache check failed: {str(e)}"
+        errors.append(error_msg)
+        logger.log_operation(
+            level=40,  # ERROR
+            message="Redis cache readiness check exception",
+            operation="readiness_check_cache",
+            extra_fields={"error": str(e), "exception_type": type(e).__name__},
+        )
 
     # Cerbos API connectivity check
     try:
@@ -152,10 +187,30 @@ async def readiness_check(
         cerbos_healthy = cerbos_service.health_check()
         checks["cerbos"] = cerbos_healthy
         if not cerbos_healthy:
-            errors.append("Cerbos health check failed")
+            error_msg = "Cerbos health check failed"
+            errors.append(error_msg)
+            logger.log_operation(
+                level=40,  # ERROR
+                message="Cerbos readiness check failed",
+                operation="readiness_check_cerbos",
+                extra_fields={"cerbos_healthy": cerbos_healthy},
+            )
+        else:
+            logger.log_operation(
+                level=10,  # DEBUG
+                message="Cerbos readiness check passed",
+                operation="readiness_check_cerbos",
+            )
     except Exception as e:
         checks["cerbos"] = False
-        errors.append(f"Cerbos check failed: {str(e)}")
+        error_msg = f"Cerbos check failed: {str(e)}"
+        errors.append(error_msg)
+        logger.log_operation(
+            level=40,  # ERROR
+            message="Cerbos readiness check exception",
+            operation="readiness_check_cerbos",
+            extra_fields={"error": str(e), "exception_type": type(e).__name__},
+        )
 
     # Overall readiness
     checks["overall"] = all([checks["database"], checks["cache"], checks["cerbos"]])
@@ -171,10 +226,26 @@ async def readiness_check(
         response["errors"] = errors
 
     if not checks["overall"]:
+        logger.log_operation(
+            level=40,  # ERROR
+            message="Readiness check failed - service not ready",
+            operation="readiness_check_overall",
+            extra_fields={
+                "checks": checks,
+                "errors": errors,
+                "failed_checks": [check for check, status in checks.items() if not status and check != "overall"],
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=response
         )
 
+    logger.log_operation(
+        level=20,  # INFO
+        message="Readiness check passed - service ready",
+        operation="readiness_check_overall",
+        extra_fields={"checks": checks},
+    )
     return response
 
 
