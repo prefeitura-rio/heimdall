@@ -42,8 +42,8 @@ spec:
               memory: 1024Mi
           readinessProbe:
             httpGet:
-              path: /api/v1/health
-              port: 8000
+              path: /api/v1/readyz
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
@@ -51,8 +51,8 @@ spec:
             successThreshold: 1
           livenessProbe:
             httpGet:
-              path: /api/v1/health
-              port: 8000
+              path: /api/v1/healthz
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 15
             timeoutSeconds: 3
@@ -123,54 +123,6 @@ spec:
     matchLabels:
       app: heimdall-background
 ---
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: heimdall-admin-scaled-object
-  annotations:
-    autoscaling.keda.sh/trigger-authentication: "default"
-spec:
-  scaleTargetRef:
-    name: heimdall-admin
-  minReplicaCount: 1
-  maxReplicaCount: 5
-  cooldownPeriod: 30
-  pollingInterval: 10
-  fallback:
-    failureThreshold: 3
-    replicas: 1
-  advanced:
-    horizontalPodAutoscalerConfig:
-      behavior:
-        scaleUp:
-          stabilizationWindowSeconds: 60
-          policies:
-          - type: Percent
-            value: 100
-            periodSeconds: 15
-          - type: Pods
-            value: 2
-            periodSeconds: 15
-          selectPolicy: Max
-        scaleDown:
-          stabilizationWindowSeconds: 300
-          policies:
-          - type: Percent
-            value: 10
-            periodSeconds: 60
-          - type: Pods
-            value: 1
-            periodSeconds: 60
-          selectPolicy: Max
-  triggers:
-    - type: prometheus
-      metadata:
-        serverAddress: http://prometheus.istio-system.svc.cluster.local:9090
-        metricName: http_requests_total
-        threshold: "100"
-        query: sum(rate(istio_requests_total{destination_workload="heimdall-admin"}[30s]))
-        activationThreshold: "50"
----
 apiVersion: v1
 kind: Service
 metadata:
@@ -181,6 +133,6 @@ spec:
   ports:
     - name: "80"
       port: 80
-      targetPort: 8000
+      targetPort: 8080
   selector:
     app: heimdall-admin
