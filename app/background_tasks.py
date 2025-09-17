@@ -18,7 +18,6 @@ from opentelemetry import trace
 load_dotenv()
 
 # Import app modules after load_dotenv() to ensure environment is set
-from app.config import validate_environment  # noqa: E402
 from app.database import get_db_session  # noqa: E402
 from app.logging_config import (  # noqa: E402
     get_structured_logger,
@@ -29,7 +28,7 @@ from app.services.audit import AuditService  # noqa: E402
 from app.services.base import BaseService  # noqa: E402
 from app.services.cerbos import CerbosService  # noqa: E402
 from app.services.user import UserService  # noqa: E402
-from app.settings import settings  # noqa: E402
+from app.settings import settings, validate_environment  # noqa: E402
 from app.tracing import setup_tracing  # noqa: E402
 
 # Configure structured logging

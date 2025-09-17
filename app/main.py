@@ -19,7 +19,6 @@ load_dotenv()
 
 # Import app modules after load_dotenv() to ensure environment is set
 from app.background_tasks import BackgroundTaskService  # noqa: E402
-from app.config import validate_environment  # noqa: E402
 from app.database import engine  # noqa: E402
 from app.exceptions import CerbosUnavailableError  # noqa: E402
 from app.logging_config import (  # noqa: E402
@@ -38,6 +37,7 @@ from app.routers import (  # noqa: E402
 from app.services.cerbos import CerbosService  # noqa: E402
 from app.services.database_monitor import setup_database_monitoring  # noqa: E402
 from app.services.health_monitor import HealthMonitor  # noqa: E402
+from app.settings import validate_environment  # noqa: E402
 from app.tracing import (  # noqa: E402
     instrument_fastapi,
     instrument_sqlalchemy,
