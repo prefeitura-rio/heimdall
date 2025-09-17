@@ -8,6 +8,7 @@ from typing import Any
 
 import redis
 from redis.connection import ConnectionPool
+from redis.sentinel import Sentinel
 
 from app.services.base import BaseService
 from app.settings import settings
@@ -25,25 +26,65 @@ class CacheService(BaseService):
         self.user_roles_ttl = settings.REDIS_USER_ROLES_TTL
         self.jwks_ttl = settings.REDIS_JWKS_TTL
 
-        # Initialize Redis connection pool
-        self.pool = ConnectionPool.from_url(
-            self.redis_url,
-            max_connections=10,
-            retry_on_timeout=True,
-            socket_timeout=5,
-            socket_connect_timeout=5,
-        )
-        self.redis_client = redis.Redis(connection_pool=self.pool)
+        # Initialize Redis connection (Sentinel-aware or standalone)
+        self.redis_client = self._create_redis_client()
 
-    def _get_redis_connection(self) -> redis.Redis:
-        """Get Redis connection with error handling."""
+    def _create_redis_client(self) -> redis.Redis:
+        """Create Redis client with Sentinel support for HA or standalone mode."""
         try:
-            # Test connection
+            # Check if Sentinel configuration is available
+            sentinel_hosts = settings.get_redis_sentinel_hosts()
+            sentinel_service = settings.get_redis_sentinel_service_name()
+            redis_password = settings.get_redis_password()
+            
+            if sentinel_hosts and sentinel_service:
+                # Use Redis Sentinel for HA setup
+                sentinel = Sentinel(
+                    sentinel_hosts,
+                    socket_timeout=0.5,
+                    password=redis_password if redis_password else None
+                )
+                
+                # Get master for writes
+                master = sentinel.master_for(
+                    sentinel_service,
+                    socket_timeout=5,
+                    password=redis_password if redis_password else None,
+                    retry_on_timeout=True,
+                    socket_keepalive=True
+                )
+                return master
+            else:
+                # Use standalone Redis connection
+                pool = ConnectionPool.from_url(
+                    self.redis_url,
+                    max_connections=10,
+                    retry_on_timeout=True,
+                    socket_timeout=5,
+                    socket_connect_timeout=5,
+                )
+                return redis.Redis(connection_pool=pool)
+                
+        except Exception:
+            # Fallback to standalone mode
+            pool = ConnectionPool.from_url(
+                self.redis_url,
+                max_connections=10,
+                retry_on_timeout=True,
+                socket_timeout=5,
+                socket_connect_timeout=5,
+            )
+            return redis.Redis(connection_pool=pool)
+    
+    def _get_redis_connection(self) -> redis.Redis:
+        """Get Redis connection with error handling and reconnection."""
+        try:
+            # Test current connection
             self.redis_client.ping()
             return self.redis_client
         except redis.ConnectionError:
-            # Create new connection if current one failed
-            self.redis_client = redis.Redis(connection_pool=self.pool)
+            # Recreate connection if lost
+            self.redis_client = self._create_redis_client()
             return self.redis_client
 
     def get_mapping_cache(self, path: str, method: str) -> dict[str, Any] | None:
