@@ -3,7 +3,6 @@ Database connection layer for Heimdall Admin Service.
 Implements SQLAlchemy engine configuration and session management.
 """
 
-import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import Engine, create_engine
@@ -11,13 +10,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import Base
+from app.settings import settings
 
 
 def get_database_url() -> str:
-    """Get database URL from environment variables."""
-    return os.getenv(
-        "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/heimdall_dev"
-    )
+    """Get database URL from centralized settings."""
+    return settings.get_database_url()
 
 
 def create_database_engine() -> Engine:
@@ -34,7 +32,7 @@ def create_database_engine() -> Engine:
         pool_size=5,
         max_overflow=10,
         # Echo SQL queries in debug mode
-        echo=os.getenv("SQL_DEBUG", "false").lower() == "true",
+        echo=settings.is_debug_mode(),
     )
 
     return engine

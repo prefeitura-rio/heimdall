@@ -3,7 +3,6 @@ OpenTelemetry tracing configuration for Heimdall Admin Service.
 Implements distributed tracing with gRPC OTLP exporter as specified in SPEC.md Section 6.
 """
 
-import os
 from typing import Any
 
 from opentelemetry import trace
@@ -14,15 +13,17 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+from app.settings import settings
+
 
 def get_service_name() -> str:
-    """Get service name from environment variables."""
-    return os.getenv("OTEL_SERVICE_NAME", "heimdall-admin-service")
+    """Get service name from centralized settings."""
+    return settings.OTEL_SERVICE_NAME
 
 
 def get_otlp_endpoint() -> str | None:
-    """Get OTLP exporter endpoint from environment variables. Returns None if not set."""
-    return os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    """Get OTLP exporter endpoint from centralized settings. Returns None if not set."""
+    return settings.OTEL_EXPORTER_OTLP_ENDPOINT
 
 
 def is_tracing_enabled() -> bool:
@@ -31,9 +32,9 @@ def is_tracing_enabled() -> bool:
 
 
 def get_resource_attributes() -> dict[str, Any]:
-    """Parse resource attributes from environment variables."""
+    """Parse resource attributes from centralized settings."""
     default_attrs = f"service.name={get_service_name()},service.version=1.0.0"
-    attrs_str = os.getenv("OTEL_RESOURCE_ATTRIBUTES", default_attrs)
+    attrs_str = settings.OTEL_RESOURCE_ATTRIBUTES or default_attrs
 
     attrs = {}
     for pair in attrs_str.split(","):

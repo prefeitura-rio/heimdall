@@ -1,4 +1,3 @@
-import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -6,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 # Import our models for autogenerate support
 from app.models import Base
+from app.settings import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -20,10 +20,8 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = Base.metadata
 
-# Set database URL from environment variable
-database_url = os.getenv(
-    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/heimdall_dev"
-)
+# Set database URL from centralized settings
+database_url = settings.get_database_url()
 config.set_main_option("sqlalchemy.url", database_url)
 
 # other values from the config, defined by the needs of env.py,

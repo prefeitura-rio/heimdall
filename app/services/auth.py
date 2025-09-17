@@ -3,7 +3,6 @@ Authentication service with OpenTelemetry tracing.
 Implements JWT verification and user management with distributed tracing.
 """
 
-import os
 from typing import Any
 
 import requests
@@ -12,6 +11,7 @@ from opentelemetry import trace
 
 from app.services.base import BaseService
 from app.services.cache import CacheService
+from app.settings import settings
 
 
 class AuthService(BaseService):
@@ -19,10 +19,10 @@ class AuthService(BaseService):
 
     def __init__(self):
         super().__init__("auth")
-        self.jwks_url = os.getenv("KEYCLOAK_JWKS_URL")
-        self.jwt_algorithm = os.getenv("JWT_ALGORITHM", "RS256")
-        self.jwt_audience = os.getenv("JWT_AUDIENCE")
-        self.static_api_token = os.getenv("STATIC_API_TOKEN")
+        self.jwks_url = settings.get_keycloak_jwks_url()
+        self.jwt_algorithm = settings.JWT_ALGORITHM
+        self.jwt_audience = settings.JWT_AUDIENCE
+        self.static_api_token = settings.STATIC_API_TOKEN
         self.cache_service = CacheService()
 
     def _fetch_jwks(self) -> dict[str, Any]:

@@ -3,7 +3,6 @@ User management service with OpenTelemetry tracing.
 Implements auto-user creation and user management with distributed tracing.
 """
 
-import os
 from typing import Any
 
 from opentelemetry import trace
@@ -12,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import Role, User, UserRole
 from app.services.base import BaseService
 from app.services.cache import CacheService
+from app.settings import settings
 
 
 class UserService(BaseService):
@@ -19,8 +19,8 @@ class UserService(BaseService):
 
     def __init__(self):
         super().__init__("user")
-        self.keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "superapp")
-        self.admin_role_name = os.getenv("KEYCLOAK_ADMIN_ROLE", "heimdall-admin")
+        self.keycloak_client_id = settings.KEYCLOAK_CLIENT_ID
+        self.admin_role_name = settings.KEYCLOAK_ADMIN_ROLE
         self.cache_service = CacheService()
 
     def get_or_create_user(self, db: Session, jwt_payload: dict[str, Any]) -> User:

@@ -4,7 +4,6 @@ Implements reconciliation and sync retry tasks using APScheduler.
 """
 
 import asyncio
-import os
 import signal
 import sys
 from datetime import datetime, timedelta
@@ -30,6 +29,7 @@ from app.services.audit import AuditService  # noqa: E402
 from app.services.base import BaseService  # noqa: E402
 from app.services.cerbos import CerbosService  # noqa: E402
 from app.services.user import UserService  # noqa: E402
+from app.settings import settings  # noqa: E402
 from app.tracing import setup_tracing  # noqa: E402
 
 # Configure structured logging
@@ -47,13 +47,9 @@ class BackgroundTaskService(BaseService):
         self.user_service = UserService()
         self.audit_service = AuditService()
 
-        # Configuration from environment
-        self.reconcile_interval = int(
-            os.getenv("RECONCILE_INTERVAL_SECONDS", "300")
-        )  # 5 minutes
-        self.sync_retry_interval = int(
-            os.getenv("SYNC_RETRY_INTERVAL_SECONDS", "60")
-        )  # 1 minute
+        # Configuration from centralized settings
+        self.reconcile_interval = settings.get_reconcile_interval()
+        self.sync_retry_interval = settings.get_sync_retry_interval()
 
         # Shutdown flag
         self.shutdown_requested = False

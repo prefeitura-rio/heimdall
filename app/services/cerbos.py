@@ -3,7 +3,6 @@ Cerbos integration service with OpenTelemetry tracing.
 Implements Cerbos Check and Admin API calls as specified in SPEC.md Section 4.
 """
 
-import os
 import time
 import uuid
 from typing import Any
@@ -13,6 +12,7 @@ from opentelemetry import trace
 
 from app.exceptions import CerbosUnavailableError
 from app.services.base import BaseService
+from app.settings import settings
 
 
 class CerbosService(BaseService):
@@ -20,12 +20,12 @@ class CerbosService(BaseService):
 
     def __init__(self):
         super().__init__("cerbos")
-        self.base_url = os.getenv("CERBOS_BASE_URL", "http://localhost:3592")
+        self.base_url = settings.get_cerbos_base_url()
         self.check_url = f"{self.base_url}/api/check/resources"
         self.admin_url = f"{self.base_url}/admin/policy"
         self.server_info_url = f"{self.base_url}/api/server_info"
-        self.admin_user = os.getenv("CERBOS_ADMIN_USER", "cerbos")
-        self.admin_password = os.getenv("CERBOS_ADMIN_PASSWORD", "cerbos")
+        self.admin_user = settings.CERBOS_ADMIN_USER
+        self.admin_password = settings.CERBOS_ADMIN_PASSWORD
         self.max_retries = 3
         self.base_retry_delay = 1.0  # seconds
 

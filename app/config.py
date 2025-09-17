@@ -13,6 +13,7 @@ import redis
 import requests
 
 from app.logging_config import get_structured_logger
+from app.settings import settings
 
 logger = get_structured_logger(__name__)
 
@@ -87,7 +88,7 @@ class Config:
     def _get_required_variables(self) -> list[tuple[str, str]]:
         """Get list of required environment variables with descriptions."""
         return [
-            ("DB_DSN", "PostgreSQL database connection string"),
+            ("DATABASE_URL", "PostgreSQL database connection string"),
             ("CERBOS_BASE_URL", "Cerbos Base URL"),
             ("CERBOS_ADMIN_USER", "Cerbos Admin API username"),
             ("CERBOS_ADMIN_PASSWORD", "Cerbos Admin API password"),
@@ -189,24 +190,24 @@ class Config:
 
     def _validate_database_config(self) -> None:
         """Validate database connection string format."""
-        db_dsn = os.getenv("DB_DSN")
-        if db_dsn:
+        db_url = settings.get_database_url()
+        if db_url:
             try:
-                parsed = urlparse(db_dsn)
+                parsed = urlparse(db_url)
                 if parsed.scheme != "postgresql":
                     self.errors.append(
-                        f"DB_DSN must use postgresql:// scheme: {db_dsn}"
+                        f"DATABASE_URL must use postgresql:// scheme: {db_url}"
                     )
                 if not parsed.hostname:
-                    self.errors.append(f"DB_DSN must include database host: {db_dsn}")
+                    self.errors.append(f"DATABASE_URL must include database host: {db_url}")
                 if not parsed.path or parsed.path == "/":
-                    self.errors.append(f"DB_DSN must include database name: {db_dsn}")
+                    self.errors.append(f"DATABASE_URL must include database name: {db_url}")
                 if not parsed.username:
-                    self.errors.append(f"DB_DSN must include username: {db_dsn}")
+                    self.errors.append(f"DATABASE_URL must include username: {db_url}")
                 # Note: password is optional for some PostgreSQL auth methods
             except Exception as e:
                 self.errors.append(
-                    f"DB_DSN is not a valid PostgreSQL connection string: {db_dsn} (error: {e})"
+                    f"DATABASE_URL is not a valid PostgreSQL connection string: {db_url} (error: {e})"
                 )
 
     def _validate_redis_config(self) -> None:
@@ -320,7 +321,7 @@ class Config:
         config_summary = {}
 
         # Required variables (mask sensitive values)
-        for var_name, _description in self._get_required_variables():
+        for var_name, _ in self._get_required_variables():
             value = os.getenv(var_name)
             if value:
                 if "password" in var_name.lower() or "token" in var_name.lower():
@@ -343,7 +344,7 @@ class Config:
                 config_summary[var_name] = "***NOT_SET***"
 
         # Optional variables with defaults
-        for var_name, _description, default in self._get_optional_variables():
+        for var_name, _, default in self._get_optional_variables():
             value = os.getenv(var_name, default)
             config_summary[var_name] = value
 
@@ -376,12 +377,12 @@ class Config:
     def _test_database_connection(self) -> bool:
         """Test PostgreSQL database connectivity."""
         try:
-            db_dsn = os.getenv("DB_DSN")
-            if not db_dsn:
+            db_url = settings.get_database_url()
+            if not db_url:
                 return False
 
-            # Parse DSN and test connection
-            conn = psycopg2.connect(db_dsn)
+            # Parse URL and test connection
+            conn = psycopg2.connect(db_url)
             cursor = conn.cursor()
             cursor.execute("SELECT 1")
             cursor.fetchone()

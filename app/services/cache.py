@@ -4,13 +4,13 @@ Implements server-side caching as specified in SPEC.md Section 6.
 """
 
 import json
-import os
 from typing import Any
 
 import redis
 from redis.connection import ConnectionPool
 
 from app.services.base import BaseService
+from app.settings import settings
 
 
 class CacheService(BaseService):
@@ -19,11 +19,11 @@ class CacheService(BaseService):
     def __init__(self):
         super().__init__("cache")
 
-        # Redis configuration from environment
-        self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.mapping_ttl = int(os.getenv("REDIS_MAPPING_TTL", "60"))
-        self.user_roles_ttl = int(os.getenv("REDIS_USER_ROLES_TTL", "30"))
-        self.jwks_ttl = int(os.getenv("REDIS_JWKS_TTL", "300"))
+        # Redis configuration from centralized settings
+        self.redis_url = settings.get_redis_url()
+        self.mapping_ttl = settings.REDIS_MAPPING_TTL
+        self.user_roles_ttl = settings.REDIS_USER_ROLES_TTL
+        self.jwks_ttl = settings.REDIS_JWKS_TTL
 
         # Initialize Redis connection pool
         self.pool = ConnectionPool.from_url(
