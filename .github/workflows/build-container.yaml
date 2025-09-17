@@ -19,18 +19,31 @@ jobs:
       - name: Check if k8s-only changes
         id: check-k8s-only
         run: |
-          # Get list of changed files
-          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
-          
-          # Check if only k8s/ files were changed
-          NON_K8S_FILES=$(echo "$CHANGED_FILES" | grep -v "^k8s/" || true)
-          
-          if [ -z "$NON_K8S_FILES" ] && [ -n "$CHANGED_FILES" ]; then
-            echo "k8s_only=true" >> $GITHUB_OUTPUT
-            echo "Only k8s/ files changed, skipping build"
-          else
+          # Get list of changed files, handling first push and invalid refs
+          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e ${{ github.event.before }} 2>/dev/null; then
+            # First push or invalid before ref, build everything
             echo "k8s_only=false" >> $GITHUB_OUTPUT
-            echo "Non-k8s files changed, proceeding with build"
+            echo "First push or invalid before ref, proceeding with build"
+          else
+            # Get list of changed files
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+            
+            if [ -z "$CHANGED_FILES" ]; then
+              # No changes, skip build
+              echo "k8s_only=true" >> $GITHUB_OUTPUT
+              echo "No files changed, skipping build"
+            else
+              # Check if only k8s/ files were changed
+              NON_K8S_FILES=$(echo "$CHANGED_FILES" | grep -v "^k8s/" || true)
+              
+              if [ -z "$NON_K8S_FILES" ]; then
+                echo "k8s_only=true" >> $GITHUB_OUTPUT
+                echo "Only k8s/ files changed, skipping build"
+              else
+                echo "k8s_only=false" >> $GITHUB_OUTPUT
+                echo "Non-k8s files changed, proceeding with build"
+              fi
+            fi
           fi
 
       - name: Skip build if k8s-only
