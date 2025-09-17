@@ -35,6 +35,7 @@ RUN uv sync --frozen --no-dev
 # Copy application code
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+COPY alembic.ini ./
 
 # Change ownership to app user
 RUN chown -R appuser:appuser /app
