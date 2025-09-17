@@ -61,7 +61,7 @@ FROM base AS background
 # No exposed ports for background service
 # Health check for background service (check if process is running)
 HEALTHCHECK --interval=60s --timeout=10s --start-period=10s --retries=3 \
-    CMD pgrep -f "python app/background_tasks.py" || exit 1
+    CMD pgrep -f "python -m app.background_tasks" || exit 1
 
 # Command to run background tasks with APScheduler
-CMD ["uv", "run", "python", "app/background_tasks.py"]
+CMD ["uv", "run", "python", "-m", "app.background_tasks"]

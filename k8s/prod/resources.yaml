@@ -89,7 +89,7 @@ spec:
       containers:
         - name: heimdall-background
           image: ghcr.io/prefeitura-rio/heimdall:stable
-          command: ["uv", "run", "python", "app/background_tasks.py"]
+          command: ["uv", "run", "python", "-m", "app.background_tasks"]
           envFrom:
             - secretRef:
                 name: heimdall-admin-secrets
