@@ -26,6 +26,21 @@ spec:
         sidecar.istio.io/proxyMemoryLimit: "1536Mi"
     spec:
       automountServiceAccountToken: false
+      initContainers:
+        - name: migrations
+          image: ghcr.io/prefeitura-rio/heimdall:stable
+          command: ["uv", "run", "alembic", "upgrade", "head"]
+          envFrom:
+            - secretRef:
+                name: heimdall-admin-secrets
+          resources:
+            requests:
+              ephemeral-storage: 50Mi
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       containers:
         - name: heimdall-admin
           image: ghcr.io/prefeitura-rio/heimdall:stable
