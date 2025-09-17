@@ -36,7 +36,7 @@ class CacheService(BaseService):
             sentinel_hosts = settings.get_redis_sentinel_hosts()
             sentinel_service = settings.get_redis_sentinel_service_name()
             redis_password = settings.get_redis_password()
-            
+
             if sentinel_hosts and sentinel_service:
                 # Use Redis Sentinel for HA setup
                 sentinel = Sentinel(
@@ -44,7 +44,7 @@ class CacheService(BaseService):
                     socket_timeout=0.5,
                     password=redis_password if redis_password else None
                 )
-                
+
                 # Get master for writes
                 master = sentinel.master_for(
                     sentinel_service,
@@ -64,7 +64,7 @@ class CacheService(BaseService):
                     socket_connect_timeout=5,
                 )
                 return redis.Redis(connection_pool=pool)
-                
+
         except Exception:
             # Fallback to standalone mode
             pool = ConnectionPool.from_url(
@@ -75,7 +75,7 @@ class CacheService(BaseService):
                 socket_connect_timeout=5,
             )
             return redis.Redis(connection_pool=pool)
-    
+
     def _get_redis_connection(self) -> redis.Redis:
         """Get Redis connection with error handling and reconnection."""
         try:

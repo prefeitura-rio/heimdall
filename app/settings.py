@@ -52,7 +52,7 @@ class Settings:
         self.REDIS_MAPPING_TTL: int = int(os.getenv("REDIS_MAPPING_TTL", "60"))
         self.REDIS_USER_ROLES_TTL: int = int(os.getenv("REDIS_USER_ROLES_TTL", "30"))
         self.REDIS_JWKS_TTL: int = int(os.getenv("REDIS_JWKS_TTL", "300"))
-        
+
         # Redis Sentinel (optional for HA)
         self.REDIS_SENTINEL_HOSTS: str = os.getenv("REDIS_SENTINEL_HOSTS", "")
         self.REDIS_SENTINEL_SERVICE_NAME: str = os.getenv("REDIS_SENTINEL_SERVICE_NAME", "mymaster")
@@ -83,12 +83,12 @@ class Settings:
     def get_redis_url(self) -> str:
         """Get the Redis connection URL."""
         return self.REDIS_URL
-    
+
     def get_redis_sentinel_hosts(self) -> list[tuple[str, int]] | None:
         """Get Redis Sentinel hosts for HA setup."""
         if not self.REDIS_SENTINEL_HOSTS:
             return None
-        
+
         hosts = []
         for host_port in self.REDIS_SENTINEL_HOSTS.split(","):
             host_port = host_port.strip()
@@ -98,11 +98,11 @@ class Settings:
             else:
                 hosts.append((host_port, 26379))  # Default Sentinel port
         return hosts
-    
+
     def get_redis_sentinel_service_name(self) -> str:
         """Get Redis Sentinel service name."""
         return self.REDIS_SENTINEL_SERVICE_NAME
-    
+
     def get_redis_password(self) -> str | None:
         """Get Redis password."""
         return self.REDIS_PASSWORD if self.REDIS_PASSWORD else None
