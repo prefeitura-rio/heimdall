@@ -46,6 +46,9 @@ spec:
         - name: heimdall-admin
           image: ghcr.io/prefeitura-rio/heimdall:stable
           command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+          env:
+            - name: ENABLE_BACKGROUND_TASKS
+              value: "false"
           envFrom:
             - secretRef:
                 name: heimdall-admin-secrets

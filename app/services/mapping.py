@@ -8,6 +8,7 @@ from typing import Any
 
 from opentelemetry import trace
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.models import Action, Endpoint, User
 from app.services.audit import AuditService
@@ -304,7 +305,7 @@ class MappingService(BaseService):
                     updated = True
 
                 if updated:
-                    endpoint.updated_at = db.execute("SELECT now()").scalar()
+                    endpoint.updated_at = db.execute(text("SELECT now()")).scalar()
                     db.commit()
                     db.refresh(endpoint)
 

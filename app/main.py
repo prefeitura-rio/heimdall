@@ -3,6 +3,7 @@ FastAPI application entry point for Heimdall Admin Service.
 Implements OpenTelemetry tracing setup as specified in SPEC.md Section 6.
 """
 
+import os
 import time
 
 from dotenv import load_dotenv
@@ -126,33 +127,44 @@ from contextlib import asynccontextmanager  # noqa: E402
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
+    # Check if background tasks should be enabled
+    enable_background_tasks = os.getenv("ENABLE_BACKGROUND_TASKS", "true").lower() == "true"
+    
     # Startup
-    logger.log_operation(
-        level=20,  # INFO
-        message="Starting background services",
-        operation="startup_background_services",
-    )
+    if enable_background_tasks:
+        logger.log_operation(
+            level=20,  # INFO
+            message="Starting background services",
+            operation="startup_background_services",
+        )
 
-    # Start health monitoring
-    health_monitor.start_monitoring()
+        # Start health monitoring
+        health_monitor.start_monitoring()
 
-    # Start background task scheduler
-    await background_task_service.start_background_tasks()
+        # Start background task scheduler
+        await background_task_service.start_background_tasks()
+    else:
+        logger.log_operation(
+            level=20,  # INFO
+            message="Background tasks disabled via ENABLE_BACKGROUND_TASKS=false",
+            operation="startup_background_services_disabled",
+        )
 
     yield
 
     # Shutdown
-    logger.log_operation(
-        level=20,  # INFO
-        message="Stopping background services",
-        operation="shutdown_background_services",
-    )
+    if enable_background_tasks:
+        logger.log_operation(
+            level=20,  # INFO
+            message="Stopping background services",
+            operation="shutdown_background_services",
+        )
 
-    # Stop background task scheduler
-    await background_task_service.stop_background_tasks()
+        # Stop background task scheduler
+        await background_task_service.stop_background_tasks()
 
-    # Stop health monitoring
-    await health_monitor.stop_monitoring()
+        # Stop health monitoring
+        await health_monitor.stop_monitoring()
 
 
 # Create FastAPI application
