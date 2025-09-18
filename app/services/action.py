@@ -234,37 +234,37 @@ class ActionService(BaseService):
                 span.set_attribute("action.name", action.name)
 
                 # Delete associated relationships first (cascade deletion)
-                
+
                 # 1. Delete RoleAction relationships
                 from app.models import RoleAction
                 role_actions = db.query(RoleAction).filter(RoleAction.action_id == action.id).all()
                 if role_actions:
                     span.set_attribute("action.has_role_actions", True)
                     span.set_attribute("action.role_action_count", len(role_actions))
-                    
+
                     for role_action in role_actions:
                         db.delete(role_action)
-                    
+
                     span.set_attribute("action.role_actions_deleted", True)
                 else:
                     span.set_attribute("action.has_role_actions", False)
-                
+
                 # 2. Delete associated endpoints
                 if action.endpoints:
                     span.set_attribute("action.has_endpoints", True)
                     span.set_attribute("action.endpoint_count", len(action.endpoints))
-                    
+
                     # Delete all endpoints that reference this action
                     for endpoint in action.endpoints:
                         db.delete(endpoint)
-                    
+
                     span.set_attribute("action.endpoints_deleted", True)
                 else:
                     span.set_attribute("action.has_endpoints", False)
 
                 # Store action data for audit before deletion
                 action_data = {
-                    "name": action.name, 
+                    "name": action.name,
                     "description": action.description,
                     "deleted_role_actions_count": len(role_actions),
                     "deleted_endpoints_count": len(action.endpoints)
