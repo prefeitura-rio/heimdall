@@ -233,18 +233,25 @@ class ActionService(BaseService):
                 span.set_attribute("action.found", True)
                 span.set_attribute("action.name", action.name)
 
-                # Check if action is referenced by endpoints
+                # Delete associated endpoints first (cascade deletion)
                 if action.endpoints:
                     span.set_attribute("action.has_endpoints", True)
                     span.set_attribute("action.endpoint_count", len(action.endpoints))
-                    raise ValueError(
-                        f"Cannot delete action '{action.name}' - it is referenced by {len(action.endpoints)} endpoint(s)"
-                    )
-
-                span.set_attribute("action.has_endpoints", False)
+                    
+                    # Delete all endpoints that reference this action
+                    for endpoint in action.endpoints:
+                        db.delete(endpoint)
+                    
+                    span.set_attribute("action.endpoints_deleted", True)
+                else:
+                    span.set_attribute("action.has_endpoints", False)
 
                 # Store action data for audit before deletion
-                action_data = {"name": action.name, "description": action.description}
+                action_data = {
+                    "name": action.name, 
+                    "description": action.description,
+                    "deleted_endpoints_count": len(action.endpoints)
+                }
 
                 db.delete(action)
                 db.commit()
