@@ -132,7 +132,11 @@ jobs:
     - name: Check for changes
       id: changes
       run: |
-        if git diff --quiet docs/api/; then
+        # Check if docs/api directory exists and has any tracked files
+        if [ ! -d "docs/api" ] || [ -z "$(ls -A docs/api 2>/dev/null)" ]; then
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "OpenAPI documentation directory does not exist or is empty - creating initial files"
+        elif git diff --quiet docs/api/; then
           echo "changes=false" >> $GITHUB_OUTPUT
           echo "No changes detected in OpenAPI specification"
         else
