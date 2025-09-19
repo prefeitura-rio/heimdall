@@ -27,6 +27,7 @@ from app.models import FailedOperation, User  # noqa: E402
 from app.services.audit import AuditService  # noqa: E402
 from app.services.base import BaseService  # noqa: E402
 from app.services.cerbos import CerbosService  # noqa: E402
+from app.services.health_monitor import HealthMonitor  # noqa: E402
 from app.services.user import UserService  # noqa: E402
 from app.settings import settings, validate_environment  # noqa: E402
 from app.tracing import setup_tracing  # noqa: E402
@@ -45,6 +46,7 @@ class BackgroundTaskService(BaseService):
         self.cerbos_service = CerbosService()
         self.user_service = UserService()
         self.audit_service = AuditService()
+        self.health_monitor = HealthMonitor()
 
         # Configuration from centralized settings
         self.reconcile_interval = settings.get_reconcile_interval()
@@ -395,11 +397,19 @@ class BackgroundTaskService(BaseService):
                 )
 
     def setup_scheduler(self) -> None:
-        """Setup APScheduler with reconciliation and sync retry tasks."""
+        """Setup APScheduler with reconciliation, sync retry, and health monitoring tasks."""
         logger.log_operation(
             level=20,  # INFO
             message="Setting up background task scheduler",
             operation="scheduler_setup",
+        )
+
+        # Start health monitoring
+        self.health_monitor.start_monitoring()
+        logger.log_operation(
+            level=20,  # INFO
+            message="Health monitoring started",
+            operation="health_monitor_started",
         )
 
         # Add reconciliation task
@@ -429,6 +439,7 @@ class BackgroundTaskService(BaseService):
             extra_fields={
                 "reconcile_interval_seconds": self.reconcile_interval,
                 "sync_retry_interval_seconds": self.sync_retry_interval,
+                "health_monitoring_enabled": True,
             },
         )
 
@@ -501,6 +512,23 @@ class BackgroundTaskService(BaseService):
                 message="Shutting down background tasks service",
                 operation="service_shutdown",
             )
+            
+            # Stop health monitoring
+            try:
+                await self.health_monitor.stop_monitoring()
+                logger.log_operation(
+                    level=20,  # INFO
+                    message="Health monitoring stopped",
+                    operation="health_monitor_stopped",
+                )
+            except Exception as e:
+                logger.log_operation(
+                    level=30,  # WARNING
+                    message="Error stopping health monitoring",
+                    operation="health_monitor_stop_error",
+                    extra_fields={"error": str(e)},
+                )
+            
             self.scheduler.shutdown()
             logger.log_operation(
                 level=20,  # INFO
@@ -517,7 +545,7 @@ class BackgroundTaskService(BaseService):
                 operation="scheduler_start",
             )
 
-            # Setup and start scheduler
+            # Setup and start scheduler (includes health monitoring)
             self.setup_scheduler()
             self.scheduler.start()
 
@@ -544,6 +572,22 @@ class BackgroundTaskService(BaseService):
                 message="Stopping background tasks scheduler",
                 operation="scheduler_stop",
             )
+
+            # Stop health monitoring
+            try:
+                await self.health_monitor.stop_monitoring()
+                logger.log_operation(
+                    level=20,  # INFO
+                    message="Health monitoring stopped",
+                    operation="health_monitor_stopped",
+                )
+            except Exception as e:
+                logger.log_operation(
+                    level=30,  # WARNING
+                    message="Error stopping health monitoring",
+                    operation="health_monitor_stop_error",
+                    extra_fields={"error": str(e)},
+                )
 
             if hasattr(self, 'scheduler') and self.scheduler:
                 self.scheduler.shutdown(wait=False)
