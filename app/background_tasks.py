@@ -512,7 +512,7 @@ class BackgroundTaskService(BaseService):
                 message="Shutting down background tasks service",
                 operation="service_shutdown",
             )
-            
+
             # Stop health monitoring
             try:
                 await self.health_monitor.stop_monitoring()
@@ -528,7 +528,7 @@ class BackgroundTaskService(BaseService):
                     operation="health_monitor_stop_error",
                     extra_fields={"error": str(e)},
                 )
-            
+
             self.scheduler.shutdown()
             logger.log_operation(
                 level=20,  # INFO
