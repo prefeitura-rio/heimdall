@@ -7,8 +7,8 @@ import re
 from typing import Any
 
 from opentelemetry import trace
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.models import Action, Endpoint, User
 from app.services.audit import AuditService

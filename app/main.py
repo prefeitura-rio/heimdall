@@ -129,7 +129,7 @@ async def lifespan(_app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
     # Check if background tasks should be enabled
     enable_background_tasks = os.getenv("ENABLE_BACKGROUND_TASKS", "true").lower() == "true"
-    
+
     # Startup
     if enable_background_tasks:
         logger.log_operation(
