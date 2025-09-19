@@ -315,6 +315,42 @@ class CerbosService(BaseService):
             resource_attrs={"id": str(mapping_id)},
         )
 
+    def can_create_action(
+        self, caller_subject: str, caller_roles: list[str], action_name: str
+    ) -> bool:
+        """Check if caller can create actions."""
+        return self.check_permission(
+            caller_subject=caller_subject,
+            caller_roles=caller_roles,
+            action="action:create",
+            resource_type="action",
+            resource_attrs={"name": action_name},
+        )
+
+    def can_update_action(
+        self, caller_subject: str, caller_roles: list[str], action_id: int
+    ) -> bool:
+        """Check if caller can update actions."""
+        return self.check_permission(
+            caller_subject=caller_subject,
+            caller_roles=caller_roles,
+            action="action:update",
+            resource_type="action",
+            resource_attrs={"id": str(action_id)},
+        )
+
+    def can_delete_action(
+        self, caller_subject: str, caller_roles: list[str], action_id: int
+    ) -> bool:
+        """Check if caller can delete actions."""
+        return self.check_permission(
+            caller_subject=caller_subject,
+            caller_roles=caller_roles,
+            action="action:delete",
+            resource_type="action",
+            resource_attrs={"id": str(action_id)},
+        )
+
     # Transparent Policy Management Methods
 
     def build_principal_policy(

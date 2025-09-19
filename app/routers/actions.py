@@ -283,7 +283,7 @@ async def create_action(
         user_roles = user_service.get_user_roles(db, current_user)
 
         # Check authorization with Cerbos
-        can_create = cerbos_service.can_create_mapping(
+        can_create = cerbos_service.can_create_action(
             caller_subject=current_user.subject,
             caller_roles=user_roles,
             action_name=action_data.name,
@@ -644,10 +644,10 @@ async def update_action(
         user_roles = user_service.get_user_roles(db, current_user)
 
         # Check authorization with Cerbos
-        can_update = cerbos_service.can_update_mapping(
+        can_update = cerbos_service.can_update_action(
             caller_subject=current_user.subject,
             caller_roles=user_roles,
-            mapping_id=action_id,
+            action_id=action_id,
         )
 
         if not can_update:
@@ -773,10 +773,10 @@ async def delete_action(
         user_roles = user_service.get_user_roles(db, current_user)
 
         # Check authorization with Cerbos
-        can_delete = cerbos_service.can_delete_mapping(
+        can_delete = cerbos_service.can_delete_action(
             caller_subject=current_user.subject,
             caller_roles=user_roles,
-            mapping_id=action_id,
+            action_id=action_id,
         )
 
         if not can_delete:
