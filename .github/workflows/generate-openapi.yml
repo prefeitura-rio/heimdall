@@ -1,0 +1,222 @@
+name: Generate OpenAPI Specification
+
+on:
+  push:
+    branches: [ main, staging ]
+    paths:
+      - 'app/**'
+      - 'pyproject.toml'
+      - 'scripts/generate_openapi.py'
+  pull_request:
+    branches: [ main, staging ]
+    paths:
+      - 'app/**'
+      - 'pyproject.toml'
+      - 'scripts/generate_openapi.py'
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'Server URL (e.g., https://api.yourcompany.com)'
+        required: false
+        type: string
+      path_prefix:
+        description: 'API path prefix (e.g., /v1 or /heimdall)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  generate-openapi:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Install dependencies
+      run: |
+        uv sync --frozen
+
+    - name: Generate OpenAPI specification
+      run: |
+        # Determine server URL and path prefix
+        SERVER_URL="${{ github.event.inputs.server_url }}"
+        PATH_PREFIX="${{ github.event.inputs.path_prefix }}"
+        
+        # Set defaults based on branch if not provided via workflow_dispatch
+        if [ -z "$SERVER_URL" ] && [ "${{ github.ref_name }}" = "main" ]; then
+          SERVER_URL="https://services.pref.rio"
+        elif [ -z "$SERVER_URL" ] && [ "${{ github.ref_name }}" = "staging" ]; then
+          SERVER_URL="https://services.staging.app.dados.rio"
+        fi
+        
+        if [ -z "$PATH_PREFIX" ]; then
+          PATH_PREFIX="/heimdall-admin"
+        fi
+        
+        echo "Generating OpenAPI spec with:"
+        echo "  Server URL: ${SERVER_URL:-'(not set)'}"
+        echo "  Path Prefix: ${PATH_PREFIX:-'(not set)'}"
+        
+        # Generate OpenAPI spec
+        mkdir -p docs/api
+        
+        # Generate JSON version
+        uv run python scripts/generate_openapi.py \
+          ${SERVER_URL:+--server-url "$SERVER_URL"} \
+          ${PATH_PREFIX:+--path-prefix "$PATH_PREFIX"} \
+          --output "docs/api/openapi.json" \
+          --format json
+        
+        # Generate YAML version (if PyYAML is available)
+        uv run python scripts/generate_openapi.py \
+          ${SERVER_URL:+--server-url "$SERVER_URL"} \
+          ${PATH_PREFIX:+--path-prefix "$PATH_PREFIX"} \
+          --output "docs/api/openapi.yaml" \
+          --format yaml || echo "YAML generation skipped (PyYAML not available)"
+
+    - name: Generate API documentation
+      run: |
+        # Create a simple README for the API docs
+        cat > docs/api/README.md << 'EOF'
+        # Heimdall Admin Service API Documentation
+
+        This directory contains the auto-generated OpenAPI specification for the Heimdall Admin Service.
+
+        ## Files
+
+        - `openapi.json` - OpenAPI 3.0 specification in JSON format
+        - `openapi.yaml` - OpenAPI 3.0 specification in YAML format (if available)
+
+        ## Usage
+
+        You can use these files with various tools:
+
+        ### Swagger UI
+        Visit [Swagger Editor](https://editor.swagger.io/) and import the `openapi.json` or `openapi.yaml` file.
+
+        ### Postman
+        Import the `openapi.json` file into Postman to generate a collection.
+
+        ### Code Generation
+        Use tools like `openapi-generator` to generate client SDKs:
+
+        ```bash
+        # Generate Python client
+        openapi-generator generate -i openapi.json -g python -o clients/python
+
+        # Generate TypeScript client
+        openapi-generator generate -i openapi.json -g typescript-fetch -o clients/typescript
+
+        # Generate Go client
+        openapi-generator generate -i openapi.json -g go -o clients/go
+        ```
+
+        ## Live Documentation
+
+        When the service is running, you can access the interactive documentation at:
+        - Swagger UI: `/docs`
+        - ReDoc: `/redoc`
+
+        ## Last Updated
+
+        This specification was last updated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        Generated from commit: ${{ github.sha }}
+        Branch: ${{ github.ref_name }}
+        EOF
+
+    - name: Check for changes
+      id: changes
+      run: |
+        if git diff --quiet docs/api/; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "No changes detected in OpenAPI specification"
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "Changes detected in OpenAPI specification"
+        fi
+
+    - name: Commit and push changes
+      if: steps.changes.outputs.changes == 'true' && github.event_name == 'push'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        git add docs/api/
+        git commit -m "docs: update OpenAPI specification
+
+        Auto-generated from commit ${{ github.sha }}
+        Branch: ${{ github.ref_name }}
+        
+        🤖 Generated by GitHub Actions"
+        
+        git push
+
+    - name: Upload OpenAPI spec as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: openapi-spec-${{ github.ref_name }}
+        path: docs/api/
+        retention-days: 30
+
+    - name: Comment on PR (if applicable)
+      if: github.event_name == 'pull_request' && steps.changes.outputs.changes == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          
+          // Read the generated OpenAPI spec to get some stats
+          let specStats = '';
+          try {
+            const spec = JSON.parse(fs.readFileSync('docs/api/openapi.json', 'utf8'));
+            const pathsCount = Object.keys(spec.paths || {}).length;
+            const version = spec.info?.version || 'unknown';
+            const title = spec.info?.title || 'unknown';
+            
+            specStats = `
+            📊 **API Statistics:**
+            - Title: ${title}
+            - Version: ${version}
+            - Endpoints: ${pathsCount}
+            `;
+          } catch (error) {
+            specStats = '\n⚠️ Could not read OpenAPI specification stats.';
+          }
+          
+          const comment = `## 🔄 OpenAPI Specification Updated
+          
+          The OpenAPI specification has been regenerated based on the changes in this PR.
+          
+          ${specStats}
+          
+          📁 **Generated files:**
+          - \`docs/api/openapi.json\` - JSON format
+          - \`docs/api/openapi.yaml\` - YAML format (if available)
+          - \`docs/api/README.md\` - Documentation
+          
+          🔗 **Preview the changes:**
+          - Download the artifact from this workflow run
+          - Import \`openapi.json\` into [Swagger Editor](https://editor.swagger.io/)
+          
+          > 🤖 This comment was generated automatically by the OpenAPI generation workflow.`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
