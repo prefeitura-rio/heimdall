@@ -50,6 +50,7 @@ class Settings:
         # Redis Caching
         self.REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         self.REDIS_MAPPING_TTL: int = int(os.getenv("REDIS_MAPPING_TTL", "60"))
+        self.REDIS_MAPPING_CACHE_TTL: int = int(os.getenv("REDIS_MAPPING_CACHE_TTL", "300"))
         self.REDIS_USER_ROLES_TTL: int = int(os.getenv("REDIS_USER_ROLES_TTL", "30"))
         self.REDIS_JWKS_TTL: int = int(os.getenv("REDIS_JWKS_TTL", "300"))
 
@@ -187,6 +188,7 @@ class Settings:
             ("KEYCLOAK_ADMIN_ROLE", "Keycloak client role name that grants superadmin privileges", "heimdall-admin"),
             ("REDIS_URL", "Redis connection URL", "redis://redis:6379/0"),
             ("REDIS_MAPPING_TTL", "Mapping cache TTL in seconds", "60"),
+            ("REDIS_MAPPING_CACHE_TTL", "Mapping lookup cache TTL in seconds", "300"),
             ("REDIS_USER_ROLES_TTL", "User roles cache TTL in seconds", "30"),
             ("REDIS_JWKS_TTL", "JWKS cache TTL in seconds", "300"),
             (
@@ -409,6 +411,7 @@ class Settings:
         errors = []
         numeric_vars = [
             ("REDIS_MAPPING_TTL", self.REDIS_MAPPING_TTL, 1, 86400),  # 1 second to 1 day
+            ("REDIS_MAPPING_CACHE_TTL", self.REDIS_MAPPING_CACHE_TTL, 0, 86400),  # 0 (disabled) to 1 day
             ("REDIS_USER_ROLES_TTL", self.REDIS_USER_ROLES_TTL, 1, 3600),  # 1 second to 1 hour
             ("REDIS_JWKS_TTL", self.REDIS_JWKS_TTL, 60, 86400),  # 1 minute to 1 day
             ("RECONCILE_INTERVAL_SECONDS", self.RECONCILE_INTERVAL_SECONDS, 1, 86400),  # 1 second to 1 day (UUID change detection allows very frequent checks)
@@ -518,6 +521,7 @@ class Settings:
             "KEYCLOAK_ADMIN_ROLE": self.KEYCLOAK_ADMIN_ROLE,
             "REDIS_URL": self.REDIS_URL,
             "REDIS_MAPPING_TTL": self.REDIS_MAPPING_TTL,
+            "REDIS_MAPPING_CACHE_TTL": self.REDIS_MAPPING_CACHE_TTL,
             "REDIS_USER_ROLES_TTL": self.REDIS_USER_ROLES_TTL,
             "REDIS_JWKS_TTL": self.REDIS_JWKS_TTL,
             "OTEL_EXPORTER_OTLP_ENDPOINT": self.OTEL_EXPORTER_OTLP_ENDPOINT,

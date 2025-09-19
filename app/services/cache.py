@@ -23,6 +23,7 @@ class CacheService(BaseService):
         # Redis configuration from centralized settings
         self.redis_url = settings.get_redis_url()
         self.mapping_ttl = settings.REDIS_MAPPING_TTL
+        self.mapping_cache_ttl = settings.REDIS_MAPPING_CACHE_TTL
         self.user_roles_ttl = settings.REDIS_USER_ROLES_TTL
         self.jwks_ttl = settings.REDIS_JWKS_TTL
 

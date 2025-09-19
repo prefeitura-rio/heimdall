@@ -150,6 +150,40 @@ async def lifespan(_app: FastAPI):
             operation="startup_background_services_disabled",
         )
 
+    # Sync mappings to Redis on startup (always, regardless of background tasks)
+    try:
+        from app.database import get_db_session
+        from app.services.mapping import MappingService
+
+        logger.log_operation(
+            level=20,  # INFO
+            message="Syncing endpoint mappings to Redis",
+            operation="startup_redis_mapping_sync",
+        )
+
+        mapping_service = MappingService()
+        with get_db_session() as db:
+            success = mapping_service.sync_all_mappings_to_redis(db)
+
+        if success:
+            logger.log_operation(
+                level=20,  # INFO
+                message="Redis mapping sync completed successfully",
+                operation="startup_redis_mapping_sync_success",
+            )
+        else:
+            logger.log_operation(
+                level=30,  # WARNING
+                message="Redis mapping sync failed",
+                operation="startup_redis_mapping_sync_failed",
+            )
+    except Exception as e:
+        logger.log_operation(
+            level=40,  # ERROR
+            message=f"Redis mapping sync error: {e}",
+            operation="startup_redis_mapping_sync_error",
+        )
+
     yield
 
     # Shutdown
