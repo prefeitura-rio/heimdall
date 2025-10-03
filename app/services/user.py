@@ -145,11 +145,12 @@ class UserService(BaseService):
                 granted_by=user.id,  # Self-granted through JWT
             )
             db.add(user_role)
-            db.commit()
 
-            # Invalidate user roles cache after role assignment
+            # Invalidate user roles cache before committing to ensure consistency
             self.cache_service.invalidate_user_roles_cache(user.subject)
             span.set_attribute("user.cache_invalidated", True)
+
+            db.commit()
 
             span.set_attribute("user.assigned_superadmin", True)
             span.set_attribute("user.superadmin_role_id", superadmin_role.id)
@@ -182,11 +183,12 @@ class UserService(BaseService):
 
             if existing_superadmin:
                 db.delete(existing_superadmin)
-                db.commit()
 
-                # Invalidate user roles cache after role removal
+                # Invalidate user roles cache before committing to ensure consistency
                 self.cache_service.invalidate_user_roles_cache(user.subject)
                 span.set_attribute("user.cache_invalidated", True)
+
+                db.commit()
                 span.set_attribute("user.removed_superadmin", True)
             else:
                 span.set_attribute("user.no_superadmin_to_remove", True)
