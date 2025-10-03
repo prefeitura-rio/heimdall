@@ -8,10 +8,13 @@ from typing import Any
 from opentelemetry import trace
 from sqlalchemy.orm import Session
 
+from app.logging_config import get_structured_logger
 from app.models import Role, User, UserRole
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.settings import settings
+
+logger = get_structured_logger(__name__)
 
 
 class UserService(BaseService):
@@ -49,10 +52,11 @@ class UserService(BaseService):
                     display_name = self._extract_display_name(jwt_payload)
                     if display_name and user.display_name != display_name:
                         user.display_name = display_name
-                        db.commit()
                         span.set_attribute("user.display_name_updated", True)
+                        # Don't commit yet - let _ensure_superadmin_role handle it
 
                     # Check and update superadmin role if needed
+                    # This will commit any pending changes (including display_name)
                     self._ensure_superadmin_role(db, user, jwt_payload, span)
 
                     span.set_attribute("user.found_existing", True)
@@ -113,6 +117,13 @@ class UserService(BaseService):
             if not has_admin_role:
                 # User doesn't have admin role, check if they have superadmin and remove it
                 self._remove_superadmin_if_exists(db, user, span)
+                # Commit any pending changes (e.g., display_name updates)
+                if db.is_modified(user):
+                    db.commit()
+                    logger.info(
+                        f"Committed pending updates for user {user.subject} (no admin role)",
+                        extra={"user_subject": user.subject}
+                    )
                 return
 
             # User has admin role, ensure they have superadmin
@@ -125,6 +136,13 @@ class UserService(BaseService):
 
             if existing_superadmin:
                 span.set_attribute("user.already_has_superadmin", True)
+                # Commit any pending changes (e.g., display_name updates)
+                if db.is_modified(user):
+                    db.commit()
+                    logger.info(
+                        f"Committed pending updates for user {user.subject}",
+                        extra={"user_subject": user.subject}
+                    )
                 return
 
             # Create superadmin role if it doesn't exist
@@ -158,16 +176,62 @@ class UserService(BaseService):
         except Exception as e:
             span.record_exception(e)
             span.set_attribute("user.superadmin_assignment_error", str(e))
+            logger.error(
+                f"Failed to assign/remove superadmin role for user {user.subject}",
+                extra={
+                    "user_subject": user.subject,
+                    "user_id": user.id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True
+            )
             # Don't fail user creation if role assignment fails
             db.rollback()
 
     def _has_admin_role(self, jwt_payload: dict[str, Any]) -> bool:
         """Check if user has admin role in Keycloak client roles."""
+        subject = jwt_payload.get("subject", "unknown")
+
+        # Check in resource_access (client-specific roles)
         resource_access = jwt_payload.get("resource_access", {})
         client_access = resource_access.get(self.keycloak_client_id, {})
         client_roles = client_access.get("roles", [])
 
-        return self.admin_role_name in client_roles
+        logger.info(
+            f"Checking admin role for user {subject}",
+            extra={
+                "user_subject": subject,
+                "expected_role": self.admin_role_name,
+                "expected_client_id": self.keycloak_client_id,
+                "resource_access_clients": list(resource_access.keys()),
+                "client_roles": client_roles,
+            }
+        )
+
+        has_role = self.admin_role_name in client_roles
+
+        if has_role:
+            logger.info(
+                f"User {subject} has admin role",
+                extra={
+                    "user_subject": subject,
+                    "role": self.admin_role_name,
+                    "client_id": self.keycloak_client_id,
+                }
+            )
+        else:
+            logger.info(
+                f"User {subject} does not have admin role",
+                extra={
+                    "user_subject": subject,
+                    "expected_role": self.admin_role_name,
+                    "expected_client_id": self.keycloak_client_id,
+                    "available_client_roles": client_roles,
+                }
+            )
+
+        return has_role
 
     def _remove_superadmin_if_exists(
         self, db: Session, user: User, span: trace.Span
@@ -190,12 +254,38 @@ class UserService(BaseService):
 
                 db.commit()
                 span.set_attribute("user.removed_superadmin", True)
+
+                logger.warning(
+                    f"Removed superadmin role from user {user.subject} (no longer has admin role in JWT)",
+                    extra={
+                        "user_subject": user.subject,
+                        "user_id": user.id,
+                        "action": "superadmin_role_removed"
+                    }
+                )
             else:
                 span.set_attribute("user.no_superadmin_to_remove", True)
+                # Still need to commit any pending changes (e.g., display_name updates)
+                if db.is_modified(user):
+                    db.commit()
+                    logger.info(
+                        f"Committed pending updates for user {user.subject} (no superadmin to remove)",
+                        extra={"user_subject": user.subject}
+                    )
 
         except Exception as e:
             span.record_exception(e)
             span.set_attribute("user.superadmin_removal_error", str(e))
+            logger.error(
+                f"Failed to remove superadmin role from user {user.subject}",
+                extra={
+                    "user_subject": user.subject,
+                    "user_id": user.id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True
+            )
             db.rollback()
 
     def get_user_by_subject(self, db: Session, subject: str) -> User | None:
