@@ -39,10 +39,10 @@ When the service is running, you can access the interactive documentation at:
 
 ## Last Updated
 
-This specification was last updated on: 2025-09-19 18:02:52 UTC
-Generated from commit: 75b079f64da0c8be6ab6d45a7a77a7b1dabb3816
+This specification was last updated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+Generated from commit: 4ed71b6dca9714e2b837cd1cdae04610a3218411
 
 ## Servers
 
-- **Production**: https://services.pref.rio/heimdall-admin
-- **Staging**: https://services.staging.app.dados.rio/heimdall-admin
+- **Production**: https://services.pref.rio${PATH_PREFIX}
+- **Staging**: https://services.staging.app.dados.rio${PATH_PREFIX}
