@@ -120,7 +120,7 @@ class UserService(BaseService):
                 # Commit any pending changes (e.g., display_name updates)
                 if db.is_modified(user):
                     db.commit()
-                    logger.info(
+                    logger.logger.info(
                         f"Committed pending updates for user {user.subject} (no admin role)",
                         extra={"user_subject": user.subject}
                     )
@@ -139,7 +139,7 @@ class UserService(BaseService):
                 # Commit any pending changes (e.g., display_name updates)
                 if db.is_modified(user):
                     db.commit()
-                    logger.info(
+                    logger.logger.info(
                         f"Committed pending updates for user {user.subject}",
                         extra={"user_subject": user.subject}
                     )
@@ -176,7 +176,7 @@ class UserService(BaseService):
         except Exception as e:
             span.record_exception(e)
             span.set_attribute("user.superadmin_assignment_error", str(e))
-            logger.error(
+            logger.logger.error(
                 f"Failed to assign/remove superadmin role for user {user.subject}",
                 extra={
                     "user_subject": user.subject,
@@ -198,7 +198,7 @@ class UserService(BaseService):
         client_access = resource_access.get(self.keycloak_client_id, {})
         client_roles = client_access.get("roles", [])
 
-        logger.info(
+        logger.logger.info(
             f"Checking admin role for user {subject}",
             extra={
                 "user_subject": subject,
@@ -212,7 +212,7 @@ class UserService(BaseService):
         has_role = self.admin_role_name in client_roles
 
         if has_role:
-            logger.info(
+            logger.logger.info(
                 f"User {subject} has admin role",
                 extra={
                     "user_subject": subject,
@@ -221,7 +221,7 @@ class UserService(BaseService):
                 }
             )
         else:
-            logger.info(
+            logger.logger.info(
                 f"User {subject} does not have admin role",
                 extra={
                     "user_subject": subject,
@@ -255,7 +255,7 @@ class UserService(BaseService):
                 db.commit()
                 span.set_attribute("user.removed_superadmin", True)
 
-                logger.warning(
+                logger.logger.warning(
                     f"Removed superadmin role from user {user.subject} (no longer has admin role in JWT)",
                     extra={
                         "user_subject": user.subject,
@@ -268,7 +268,7 @@ class UserService(BaseService):
                 # Still need to commit any pending changes (e.g., display_name updates)
                 if db.is_modified(user):
                     db.commit()
-                    logger.info(
+                    logger.logger.info(
                         f"Committed pending updates for user {user.subject} (no superadmin to remove)",
                         extra={"user_subject": user.subject}
                     )
@@ -276,7 +276,7 @@ class UserService(BaseService):
         except Exception as e:
             span.record_exception(e)
             span.set_attribute("user.superadmin_removal_error", str(e))
-            logger.error(
+            logger.logger.error(
                 f"Failed to remove superadmin role from user {user.subject}",
                 extra={
                     "user_subject": user.subject,
