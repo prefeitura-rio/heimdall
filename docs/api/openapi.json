@@ -134,6 +134,108 @@
         }
       }
     },
+    "/api/v1/users/": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "List all users",
+        "description": "Retrieve a paginated list of all users in the system.\n\n**Pagination**: Uses `skip` and `limit` query parameters for pagination.\nDefault limit is 50 users per page, maximum is 100.\n\n**Authentication**: Requires a valid JWT token.\n\n**Role Aggregation**: Each user in the response includes both direct roles\nand roles inherited through group memberships.\n\n**Use Cases**:\n- User management dashboards\n- Administrative user listing\n- User directory\n- Bulk user operations\n- Reporting and analytics\n\n**Response Fields**:\n- `items`: Array of user objects for the current page\n- `total`: Total number of users in the system\n- `skip`: Number of users skipped (offset)\n- `limit`: Maximum number of users returned in this page\n- `has_more`: Whether there are more users available",
+        "operationId": "list_users_api_v1_users__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of users to skip",
+              "default": 0,
+              "title": "Skip"
+            },
+            "description": "Number of users to skip"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Maximum number of users to return",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Maximum number of users to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Users retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_UserResponse_"
+                },
+                "example": {
+                  "items": [
+                    {
+                      "id": 1,
+                      "cpf": "12345678901",
+                      "display_name": "Jo\u00e3o Silva",
+                      "groups": [
+                        "engineering_team:backend"
+                      ],
+                      "roles": [
+                        "superadmin"
+                      ]
+                    },
+                    {
+                      "id": 2,
+                      "cpf": "98765432109",
+                      "display_name": "Maria Santos",
+                      "groups": [
+                        "data_analysts:read"
+                      ],
+                      "roles": [
+                        "data-analyst"
+                      ]
+                    }
+                  ],
+                  "total": 150,
+                  "skip": 0,
+                  "limit": 50,
+                  "has_more": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Invalid or missing JWT token"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/users/me": {
       "get": {
         "tags": [
@@ -3343,6 +3445,55 @@
           "has_more"
         ],
         "title": "PaginatedResponse[RoleResponse]"
+      },
+      "PaginatedResponse_UserResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "List of items for the current page"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "Total number of items available",
+            "example": 150
+          },
+          "skip": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Skip",
+            "description": "Number of items skipped (offset)",
+            "example": 0
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "Maximum number of items returned",
+            "example": 50
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "description": "Whether there are more items available",
+            "example": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "skip",
+          "limit",
+          "has_more"
+        ],
+        "title": "PaginatedResponse[UserResponse]"
       },
       "RoleActionRequest": {
         "properties": {
