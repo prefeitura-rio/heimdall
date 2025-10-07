@@ -5,10 +5,11 @@ Implements user endpoints as specified in SPEC.md Section 3.1.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
@@ -58,6 +59,118 @@ class UserResponse(BaseModel):
                 "roles": ["superadmin", "data-analyst"]
             }
         }
+
+
+@router.get(
+    "/",
+    response_model=PaginatedResponse[UserResponse],
+    summary="List all users",
+    description="""
+Retrieve a paginated list of all users in the system.
+
+**Pagination**: Uses `skip` and `limit` query parameters for pagination.
+Default limit is 50 users per page, maximum is 100.
+
+**Authentication**: Requires a valid JWT token.
+
+**Role Aggregation**: Each user in the response includes both direct roles
+and roles inherited through group memberships.
+
+**Use Cases**:
+- User management dashboards
+- Administrative user listing
+- User directory
+- Bulk user operations
+- Reporting and analytics
+
+**Response Fields**:
+- `items`: Array of user objects for the current page
+- `total`: Total number of users in the system
+- `skip`: Number of users skipped (offset)
+- `limit`: Maximum number of users returned in this page
+- `has_more`: Whether there are more users available
+    """,
+    responses={
+        200: {
+            "description": "Users retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "items": [
+                            {
+                                "id": 1,
+                                "cpf": "12345678901",
+                                "display_name": "João Silva",
+                                "groups": ["engineering_team:backend"],
+                                "roles": ["superadmin"]
+                            },
+                            {
+                                "id": 2,
+                                "cpf": "98765432109",
+                                "display_name": "Maria Santos",
+                                "groups": ["data_analysts:read"],
+                                "roles": ["data-analyst"]
+                            }
+                        ],
+                        "total": 150,
+                        "skip": 0,
+                        "limit": 50,
+                        "has_more": True
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Invalid or missing JWT token"
+        },
+        500: {
+            "description": "Internal server error"
+        }
+    }
+)
+async def list_users(
+    _current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
+    skip: int = Query(0, ge=0, description="Number of users to skip"),
+    limit: int = Query(50, ge=1, le=100, description="Maximum number of users to return"),
+) -> PaginatedResponse[UserResponse]:
+    """List all users with pagination."""
+    try:
+        # Get total count
+        total = db.query(User).count()
+
+        # Get paginated users
+        users = db.query(User).offset(skip).limit(limit).all()
+
+        # Build response items
+        items = []
+        for user in users:
+            user_roles = user_service.get_user_roles(db, user)
+            user_groups = user_service.get_user_groups(db, user)
+
+            items.append(
+                UserResponse(
+                    id=user.id,
+                    cpf=user.subject,
+                    display_name=user.display_name,
+                    groups=[group["name"] for group in user_groups],
+                    roles=user_roles,
+                )
+            )
+
+        return PaginatedResponse.create(
+            items=items,
+            total=total,
+            skip=skip,
+            limit=limit
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list users: {str(e)}"
+        )
 
 
 @router.get(
