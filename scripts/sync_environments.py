@@ -207,10 +207,11 @@ class HeimdallClient:
 
         while True:
             result = self._request("GET", f"/api/v1/actions/?skip={skip}&limit={limit}")
-            items = result.get("items", [])
+            items = result.get("actions", [])  # Actions use "actions" not "items"
             all_actions.extend(items)
 
-            if not result.get("has_more", False):
+            # Check if we've fetched everything
+            if skip + len(items) >= result.get("total", 0):
                 break
 
             skip += limit
@@ -237,25 +238,11 @@ class HeimdallClient:
 
     def get_all_mappings(self) -> list[dict[str, Any]]:
         """Fetch all mappings (no pagination - returns all)."""
-        return self._request("GET", "/api/v1/mappings/")
+        return self._request("GET", "/api/v1/mappings/list")
 
     def get_all_groups(self) -> list[dict[str, Any]]:
-        """Fetch all groups with pagination."""
-        all_groups = []
-        skip = 0
-        limit = 100
-
-        while True:
-            result = self._request("GET", f"/api/v1/groups/?skip={skip}&limit={limit}")
-            items = result.get("items", [])
-            all_groups.extend(items)
-
-            if not result.get("has_more", False):
-                break
-
-            skip += limit
-
-        return all_groups
+        """Fetch all groups (no pagination - returns all)."""
+        return self._request("GET", "/api/v1/groups/")
 
     def create_action(self, name: str, description: str | None = None) -> dict[str, Any]:
         """Create an action."""
@@ -299,18 +286,37 @@ class HeimdallClient:
         """Remove an action from a role."""
         self._request("DELETE", f"/api/v1/roles/{role_id}/actions/{action_id}")
 
-    def create_mapping(self, path: str, method: str, action_name: str) -> dict[str, Any]:
+    def get_action_by_name(self, action_name: str) -> dict[str, Any] | None:
+        """Get action by name."""
+        # Fetch all actions and find by name
+        actions = self.get_all_actions()
+        for action in actions:
+            if action["name"] == action_name:
+                return action
+        return None
+
+    def create_mapping(self, path_pattern: str, method: str, action_name: str) -> dict[str, Any]:
         """Create a mapping."""
+        # Look up action ID by name
+        action = self.get_action_by_name(action_name)
+        if not action:
+            raise ValueError(f"Action '{action_name}' not found")
+
         data = {
-            "path": path,
+            "path_pattern": path_pattern,
             "method": method,
-            "action_name": action_name
+            "action_id": action["id"]
         }
         return self._request("POST", "/api/v1/mappings/", json=data)
 
     def update_mapping(self, mapping_id: int, action_name: str) -> dict[str, Any]:
         """Update a mapping."""
-        data = {"action_name": action_name}
+        # Look up action ID by name
+        action = self.get_action_by_name(action_name)
+        if not action:
+            raise ValueError(f"Action '{action_name}' not found")
+
+        data = {"action_id": action["id"]}
         return self._request("PUT", f"/api/v1/mappings/{mapping_id}", json=data)
 
     def delete_mapping(self, mapping_id: int) -> None:
@@ -732,7 +738,7 @@ class EnvironmentSynchronizer:
                         if not self.dry_run:
                             try:
                                 self.target.create_mapping(
-                                    path=path,
+                                    path_pattern=path,
                                     method=method,
                                     action_name=source_mapping["action"]
                                 )
