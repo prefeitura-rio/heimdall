@@ -295,13 +295,13 @@ class HeimdallClient:
         """Delete a role."""
         self._request("DELETE", f"/api/v1/roles/{role_id}")
 
-    def assign_action_to_role(self, role_id: int, action_id: int) -> None:
+    def assign_action_to_role(self, role_name: str, action_name: str) -> None:
         """Assign an action to a role."""
-        self._request("POST", f"/api/v1/roles/{role_id}/actions/{action_id}")
+        self._request("POST", f"/api/v1/roles/{role_name}/actions", json={"action_name": action_name})
 
-    def remove_action_from_role(self, role_id: int, action_id: int) -> None:
+    def remove_action_from_role(self, role_name: str, action_name: str) -> None:
         """Remove an action from a role."""
-        self._request("DELETE", f"/api/v1/roles/{role_id}/actions/{action_id}")
+        self._request("DELETE", f"/api/v1/roles/{role_name}/actions/{action_name}")
 
     def get_action_by_name(self, action_name: str) -> dict[str, Any] | None:
         """Get action by name."""
@@ -357,13 +357,13 @@ class HeimdallClient:
         """Delete a group."""
         self._request("DELETE", f"/api/v1/groups/{group_id}")
 
-    def assign_role_to_group(self, group_id: int, role_id: int) -> None:
+    def assign_role_to_group(self, group_name: str, role_name: str) -> None:
         """Assign a role to a group."""
-        self._request("POST", f"/api/v1/groups/{group_id}/roles/{role_id}")
+        self._request("POST", f"/api/v1/roles/groups/{group_name}/roles", json={"role_name": role_name})
 
-    def remove_role_from_group(self, group_id: int, role_id: int) -> None:
+    def remove_role_from_group(self, group_name: str, role_name: str) -> None:
         """Remove a role from a group."""
-        self._request("DELETE", f"/api/v1/groups/{group_id}/roles/{role_id}")
+        self._request("DELETE", f"/api/v1/roles/groups/{group_name}/roles/{role_name}")
 
     def healthcheck(self) -> dict[str, Any]:
         """
@@ -696,13 +696,7 @@ class EnvironmentSynchronizer:
                 print(f"  [ASSIGN] Action '{action_name}' to role '{name}'")
                 if not self.dry_run:
                     try:
-                        # Find action ID by name
-                        target_action = next(
-                            (a for a in self.target.get_all_actions() if a["name"] == action_name),
-                            None
-                        )
-                        if target_action:
-                            self.target.assign_action_to_role(target_role_id, target_action["id"])
+                        self.target.assign_action_to_role(name, action_name)
                     except Exception as e:
                         print(f"    ERROR: {e}")
                         self.stats.errors += 1
@@ -712,13 +706,7 @@ class EnvironmentSynchronizer:
                 print(f"  [UNASSIGN] Action '{action_name}' from role '{name}'")
                 if not self.dry_run:
                     try:
-                        # Find action ID by name
-                        target_action = next(
-                            (a for a in self.target.get_all_actions() if a["name"] == action_name),
-                            None
-                        )
-                        if target_action:
-                            self.target.remove_action_from_role(target_role_id, target_action["id"])
+                        self.target.remove_action_from_role(name, action_name)
                     except Exception as e:
                         print(f"    ERROR: {e}")
                         self.stats.errors += 1
@@ -922,13 +910,7 @@ class EnvironmentSynchronizer:
                 print(f"  [ASSIGN] Role '{role_name}' to group '{name}'")
                 if not self.dry_run:
                     try:
-                        # Find role ID by name
-                        target_role = next(
-                            (r for r in self.target.get_all_roles() if r["name"] == role_name),
-                            None
-                        )
-                        if target_role:
-                            self.target.assign_role_to_group(target_group_id, target_role["id"])
+                        self.target.assign_role_to_group(name, role_name)
                     except Exception as e:
                         print(f"    ERROR: {e}")
                         self.stats.errors += 1
@@ -938,13 +920,7 @@ class EnvironmentSynchronizer:
                 print(f"  [UNASSIGN] Role '{role_name}' from group '{name}'")
                 if not self.dry_run:
                     try:
-                        # Find role ID by name
-                        target_role = next(
-                            (r for r in self.target.get_all_roles() if r["name"] == role_name),
-                            None
-                        )
-                        if target_role:
-                            self.target.remove_role_from_group(target_group_id, target_role["id"])
+                        self.target.remove_role_from_group(name, role_name)
                     except Exception as e:
                         print(f"    ERROR: {e}")
                         self.stats.errors += 1
