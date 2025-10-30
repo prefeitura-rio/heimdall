@@ -593,13 +593,16 @@ class CerbosService(BaseService):
                         auth=(self.admin_user, self.admin_password),
                         timeout=10,
                     )
-                    response.raise_for_status()
+                    # Ignore 404 - policy already doesn't exist (idempotent deletion)
+                    if response.status_code != 404:
+                        response.raise_for_status()
                     return response
 
                 response = self._retry_with_backoff(_make_delete_request)
 
                 span.set_attribute("http.status_code", response.status_code)
                 span.set_attribute("cerbos.policy_deleted", True)
+                span.set_attribute("cerbos.policy_already_deleted", response.status_code == 404)
 
                 return True
 
