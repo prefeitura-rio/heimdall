@@ -236,6 +236,14 @@ class HeimdallClient:
 
         return all_roles
 
+    def get_role_actions(self, role_name: str) -> list[str]:
+        """Fetch all action names for a specific role."""
+        try:
+            actions = self._request("GET", f"/api/v1/roles/{role_name}/actions")
+            return [action["name"] for action in actions]
+        except Exception:
+            return []
+
     def get_all_mappings(self) -> list[dict[str, Any]]:
         """Fetch all mappings (no pagination - returns all)."""
         return self._request("GET", "/api/v1/mappings/list")
@@ -243,6 +251,15 @@ class HeimdallClient:
     def get_all_groups(self) -> list[dict[str, Any]]:
         """Fetch all groups (no pagination - returns all)."""
         return self._request("GET", "/api/v1/groups/")
+
+    def get_group_roles(self, group_name: str) -> list[str]:
+        """Fetch all role names for a specific group."""
+        try:
+            roles = self._request("GET", f"/api/v1/roles/groups/{group_name}/roles")
+            return [role["name"] for role in roles]
+        except Exception as e:
+            # Silently return empty list on error (group may not exist or have no roles)
+            return []
 
     def create_action(self, name: str, description: str | None = None) -> dict[str, Any]:
         """Create an action."""
@@ -590,9 +607,21 @@ class EnvironmentSynchronizer:
         source_roles = {r["name"]: r for r in self.source.get_all_roles()}
         print(f"  Found {len(source_roles)} roles in source")
 
+        # Fetch actions for each source role
+        print("Fetching actions for source roles...")
+        for role_name, role in source_roles.items():
+            role["actions"] = self.source.get_role_actions(role_name)
+        print(f"  Fetched actions for {len(source_roles)} roles")
+
         print("Fetching roles from target...")
         target_roles = {r["name"]: r for r in self.target.get_all_roles()}
         print(f"  Found {len(target_roles)} roles in target")
+
+        # Fetch actions for each target role
+        print("Fetching actions for target roles...")
+        for role_name, role in target_roles.items():
+            role["actions"] = self.target.get_role_actions(role_name)
+        print(f"  Fetched actions for {len(target_roles)} roles")
 
         # Create ID mapping for later use
         role_id_map = {}
@@ -804,9 +833,21 @@ class EnvironmentSynchronizer:
         source_groups = {g["name"]: g for g in self.source.get_all_groups()}
         print(f"  Found {len(source_groups)} groups in source")
 
+        # Fetch roles for each source group
+        print("Fetching roles for source groups...")
+        for group_name, group in source_groups.items():
+            group["roles"] = self.source.get_group_roles(group_name)
+        print(f"  Fetched roles for {len(source_groups)} groups")
+
         print("Fetching groups from target...")
         target_groups = {g["name"]: g for g in self.target.get_all_groups()}
         print(f"  Found {len(target_groups)} groups in target")
+
+        # Fetch roles for each target group
+        print("Fetching roles for target groups...")
+        for group_name, group in target_groups.items():
+            group["roles"] = self.target.get_group_roles(group_name)
+        print(f"  Fetched roles for {len(target_groups)} groups")
 
         # Create ID mapping
         group_id_map = {}
