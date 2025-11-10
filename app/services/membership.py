@@ -255,8 +255,8 @@ class MembershipService(BaseService):
                 # Find and remove membership
                 membership = (
                     db.query(Membership)
-                    .join(Group)
-                    .join(User)
+                    .join(Membership.group)
+                    .join(Membership.user)
                     .filter(Group.name == group_name, User.subject == member_subject)
                     .first()
                 )
