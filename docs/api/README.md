@@ -40,7 +40,7 @@ When the service is running, you can access the interactive documentation at:
 ## Last Updated
 
 This specification was last updated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-Generated from commit: e73ac4c3b8f042ed69f4658b7361cd989b82728d
+Generated from commit: 1e76dcdd0b8201cec827c85f6d512f75b2bb48b6
 
 ## Servers
 
