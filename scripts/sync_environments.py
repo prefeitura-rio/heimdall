@@ -257,7 +257,7 @@ class HeimdallClient:
         try:
             roles = self._request("GET", f"/api/v1/roles/groups/{group_name}/roles")
             return [role["name"] for role in roles]
-        except Exception as e:
+        except Exception:
             # Silently return empty list on error (group may not exist or have no roles)
             return []
 
