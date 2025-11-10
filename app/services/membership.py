@@ -276,6 +276,7 @@ class MembershipService(BaseService):
                 span.set_attribute("membership.cache_invalidated", True)
 
                 # Update Cerbos policies after membership removal
+                user_roles = []
                 try:
                     user_roles = self._get_user_roles_after_membership_change(db, user)
 
