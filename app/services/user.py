@@ -311,7 +311,7 @@ class UserService(BaseService):
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 raise
 
-    def get_user_roles(self, _db: Session, user: User) -> list[str]:
+    def get_user_roles(self, db: Session, user: User) -> list[str]:
         """
         Get all roles for a user from both group_roles and user_roles with Redis caching.
         Implements role aggregation as specified in SPEC.md.
@@ -334,6 +334,10 @@ class UserService(BaseService):
                     return cached_roles
 
                 span.set_attribute("user.cache_hit", False)
+
+                # Expire relationships to ensure fresh data from database
+                # This prevents stale data if memberships/roles were recently changed
+                db.expire(user, ['memberships', 'user_roles'])
 
                 roles = set()
 
@@ -363,7 +367,7 @@ class UserService(BaseService):
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 raise
 
-    def get_user_groups(self, _db: Session, user: User) -> list[dict[str, Any]]:
+    def get_user_groups(self, db: Session, user: User) -> list[dict[str, Any]]:
         """Get all groups for a user with membership details."""
         with self.trace_operation(
             "get_user_groups",
@@ -374,6 +378,11 @@ class UserService(BaseService):
             },
         ) as span:
             try:
+                # Expire the memberships relationship to ensure fresh data from database
+                # This prevents stale data from being returned if memberships were
+                # recently added/removed in a different transaction
+                db.expire(user, ['memberships'])
+
                 groups = []
 
                 for membership in user.memberships:
