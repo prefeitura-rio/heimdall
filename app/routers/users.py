@@ -146,8 +146,8 @@ async def list_users(
         # Build response items
         items = []
         for user in users:
-            # Expire relationships to ensure fresh data
-            db.expire(user)
+            # Refresh user to get fresh data
+            db.refresh(user)
 
             user_roles = user_service.get_user_roles(db, user)
             user_groups = user_service.get_user_groups(db, user)
@@ -247,8 +247,8 @@ async def get_current_user_info(
 ) -> UserResponse:
     """Get information about the currently authenticated user."""
     try:
-        # Expire all relationships to ensure fresh data
-        db.expire(current_user)
+        # Refresh user from database to get fresh data
+        db.refresh(current_user)
 
         # Get user's groups and roles
         user_groups = user_service.get_user_groups(db, current_user)
@@ -372,9 +372,9 @@ async def get_user_by_cpf(
             detail=f"User with CPF '{cpf}' not found",
         )
 
-    # Expire all relationships to ensure fresh data
+    # Refresh user from database to get absolutely fresh data
     # This is critical for preventing stale data after membership/role changes
-    db.expire(user)
+    db.refresh(user)
 
     # Get user's roles and groups
     user_roles = user_service.get_user_roles(db, user)
