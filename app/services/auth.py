@@ -91,7 +91,7 @@ class AuthService(BaseService):
             raise ValueError(f"Failed to get signing key: {e}")
 
     def verify_jwt_token(self, token: str) -> dict[str, Any] | None:
-        """Verify JWT token with tracing."""
+        """Extract JWT token claims without verification (validation handled upstream)."""
         with self.trace_operation(
             "verify_jwt_token",
             {
@@ -101,34 +101,8 @@ class AuthService(BaseService):
             },
         ) as span:
             try:
-                # Check if JWKS URL is configured
-                if not self.jwks_url:
-                    span.set_attribute("auth.jwks_not_configured", True)
-                    span.set_attribute("auth.token_valid", False)
-                    return None
-
-                # Get signing key
-                signing_key = self._get_signing_key(token)
-                span.set_attribute("auth.signing_key_fetched", True)
-
-                # Verify JWT
-                options = {
-                    "verify_signature": True,
-                    "verify_exp": True,
-                    "verify_nbf": True,
-                    "verify_iat": True,
-                    "verify_aud": bool(self.jwt_audience),
-                    "require_exp": True,
-                    "require_iat": True,
-                }
-
-                payload = jwt.decode(
-                    token,
-                    signing_key,
-                    algorithms=[self.jwt_algorithm],
-                    audience=self.jwt_audience,
-                    options=options,
-                )
+                # Decode JWT without verification (validated upstream at gateway/ingress)
+                payload = jwt.get_unverified_claims(token)
 
                 # Extract user information - use preferred_username (CPF) as subject
                 user_info = {
@@ -152,7 +126,7 @@ class AuthService(BaseService):
 
                 span.set_attribute("auth.token_valid", True)
                 span.set_attribute("auth.user_subject", user_info["subject"])
-                span.set_attribute("auth.verification_successful", True)
+                span.set_attribute("auth.verification_skipped", True)
 
                 return user_info
 
@@ -162,16 +136,8 @@ class AuthService(BaseService):
                 span.set_attribute("auth.token_valid", False)
                 span.set_status(
                     trace.Status(
-                        trace.StatusCode.ERROR, f"JWT verification failed: {e}"
+                        trace.StatusCode.ERROR, f"JWT decoding failed: {e}"
                     )
-                )
-                return None
-            except ValueError as e:
-                span.record_exception(e)
-                span.set_attribute("auth.value_error", str(e))
-                span.set_attribute("auth.token_valid", False)
-                span.set_status(
-                    trace.Status(trace.StatusCode.ERROR, f"JWT validation error: {e}")
                 )
                 return None
             except Exception as e:
