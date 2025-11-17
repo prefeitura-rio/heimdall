@@ -142,3 +142,52 @@ restart:
     @pkill -f "uvicorn app.main:app" || true
     @sleep 1
     just run
+
+# OpenAPI Mapping Sync commands
+# ==============================
+
+# Initialize/update the state file from OpenAPI specs (preserves existing action names)
+init-sync:
+    @echo "Initializing OpenAPI mappings state..."
+    uv run python scripts/manage_openapi_mappings.py init --config scripts/config.json
+
+# Show what changes would be applied to Heimdall
+plan-sync:
+    @echo "Planning OpenAPI mappings sync..."
+    uv run python scripts/manage_openapi_mappings.py plan --config scripts/config.json --state openapi_mappings.state.json
+
+# Apply the planned changes to Heimdall (with confirmation)
+apply-sync:
+    @echo "Applying OpenAPI mappings to Heimdall..."
+    uv run python scripts/manage_openapi_mappings.py apply --config scripts/config.json --state openapi_mappings.state.json
+
+# Full sync: init + apply (only if no FILL_HERE actions remain)
+sync:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "🔄 Starting OpenAPI mappings sync..."
+    echo ""
+
+    # Run init
+    echo "📝 Step 1/3: Initializing state file..."
+    uv run python scripts/manage_openapi_mappings.py init --config scripts/config.json
+    echo ""
+
+    # Check for FILL_HERE in state file
+    if grep -q '"action_name": "FILL_HERE"' openapi_mappings.state.json; then
+        echo "⚠️  Found unmapped actions in state file!"
+        echo "Please edit openapi_mappings.state.json and replace 'FILL_HERE' with actual action names."
+        echo ""
+        echo "After filling in action names, run: just apply-sync"
+        exit 1
+    fi
+
+    # Show plan
+    echo "📋 Step 2/3: Reviewing changes..."
+    uv run python scripts/manage_openapi_mappings.py plan --config scripts/config.json --state openapi_mappings.state.json
+    echo ""
+
+    # Apply with confirmation
+    echo "✅ Step 3/3: Applying changes..."
+    uv run python scripts/manage_openapi_mappings.py apply --config scripts/config.json --state openapi_mappings.state.json

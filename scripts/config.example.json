@@ -1,0 +1,32 @@
+{
+  "apis": [
+    {
+      "name": "RMI",
+      "openapi_url": "https://raw.githubusercontent.com/prefeitura-rio/app-rmi/refs/heads/staging/docs/openapi-v3.json",
+      "additional_prefixes": ["/rmi/v1"]
+    },
+    {
+      "name": "Busca",
+      "openapi_url": "https://raw.githubusercontent.com/prefeitura-rio/app-busca-search/refs/heads/staging/docs/openapi-v3.json",
+      "additional_prefixes": ["/app-busca-search"]
+    },
+    {
+      "name": "GO",
+      "openapi_url": "https://raw.githubusercontent.com/prefeitura-rio/app-go-api/refs/heads/staging/docs/openapi-v3.json",
+      "additional_prefixes": ["/go"]
+    },
+    {
+      "name": "Heimdall",
+      "openapi_url": "https://raw.githubusercontent.com/prefeitura-rio/heimdall/refs/heads/main/docs/api/openapi.json",
+      "additional_prefixes": ["/heimdall-admin"]
+    }
+  ],
+  "heimdall": {
+    "api_url": "https://services.staging.app.dados.rio/heimdall-admin",
+    "token_env_var": "HEIMDALL_TOKEN"
+  },
+  "options": {
+    "auto_create_actions": true,
+    "delete_unmanaged": true
+  }
+}

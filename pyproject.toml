@@ -60,3 +60,7 @@ line-ending = "auto"
 dev = [
     "rich>=14.2.0",
 ]
+scripts = [
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]

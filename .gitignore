@@ -69,3 +69,8 @@ Thumbs.db
 
 # Sandbox directory for toy scripts
 sandbox/
+
+# OpenAPI mappings sync
+scripts/config.json
+openapi_mappings.state.json
+openapi_mappings.state.json.backup
