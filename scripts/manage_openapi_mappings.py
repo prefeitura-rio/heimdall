@@ -1022,17 +1022,18 @@ def plan(config: str, state: str) -> None:
                 all_generated.extend(mappings)
             console.print(f"✓ Generated {len(mappings)} mappings for {api_config.name}")
 
-        # Validate no FILL_HERE placeholders
-        unfilled = [m for m in all_generated if m.action_name == "FILL_HERE"]
+        # Validate no FILL_HERE or empty action names
+        unfilled = [m for m in all_generated if m.action_name == "FILL_HERE" or not m.action_name or m.action_name.strip() == ""]
         if unfilled:
             console.print(
-                f"\n[bold red]✗ Error: {len(unfilled)} mappings still have 'FILL_HERE' as action name[/bold red]"
+                f"\n[bold red]✗ Error: {len(unfilled)} mappings have invalid action names[/bold red]"
             )
             console.print(
                 "\n[yellow]Please edit the state file and fill in action names for:[/yellow]"
             )
             for m in unfilled[:10]:  # Show first 10
-                console.print(f"  - {m.method} {m.path_pattern}")
+                action_desc = "FILL_HERE" if m.action_name == "FILL_HERE" else "(empty)"
+                console.print(f"  - {m.method} {m.path_pattern} -> {action_desc}")
             if len(unfilled) > 10:
                 console.print(f"  ... and {len(unfilled) - 10} more")
             sys.exit(1)
@@ -1112,17 +1113,18 @@ def apply(config: str, state: str, auto_approve: bool) -> None:
                 all_generated.extend(mappings)
             console.print(f"✓ Generated {len(mappings)} mappings for {api_config.name}")
 
-        # Validate no FILL_HERE placeholders
-        unfilled = [m for m in all_generated if m.action_name == "FILL_HERE"]
+        # Validate no FILL_HERE or empty action names
+        unfilled = [m for m in all_generated if m.action_name == "FILL_HERE" or not m.action_name or m.action_name.strip() == ""]
         if unfilled:
             console.print(
-                f"\n[bold red]✗ Error: {len(unfilled)} mappings still have 'FILL_HERE' as action name[/bold red]"
+                f"\n[bold red]✗ Error: {len(unfilled)} mappings have invalid action names[/bold red]"
             )
             console.print(
                 "\n[yellow]Please edit the state file and fill in action names for:[/yellow]"
             )
             for m in unfilled[:10]:  # Show first 10
-                console.print(f"  - {m.method} {m.path_pattern}")
+                action_desc = "FILL_HERE" if m.action_name == "FILL_HERE" else "(empty)"
+                console.print(f"  - {m.method} {m.path_pattern} -> {action_desc}")
             if len(unfilled) > 10:
                 console.print(f"  ... and {len(unfilled) - 10} more")
             sys.exit(1)
