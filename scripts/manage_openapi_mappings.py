@@ -523,6 +523,10 @@ class HeimdallClient:
     def create_action(self, name: str, description: str | None = None) -> int:
         """Create a new action and return its ID."""
         # POST /actions/ - create action
+        # Description is required by the API
+        if not description:
+            description = f"Auto-created action: {name}"
+
         data = {"name": name, "description": description}
         response = requests.post(
             f"{self.api_url}/actions/",
