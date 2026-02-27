@@ -53,18 +53,21 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from enum import Enum
-from pathlib import Path
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any
 
 import click
 import requests
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-from rich.table import Table
-from rich.text import Text
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 
 console = Console()
 
@@ -142,7 +145,7 @@ class Config(BaseModel):
 # ============================================================================
 
 
-class ChangeType(str, Enum):
+class ChangeType(StrEnum):
     """Type of change for a mapping."""
 
     CREATE = "create"
@@ -221,21 +224,13 @@ class OpenAPIProcessor:
 
     def should_include_path(self, path: str) -> bool:
         """Check if path should be included based on filters."""
-        if self.api_config.include_patterns:
-            if not any(
-                re.match(pattern, path)
-                for pattern in self.api_config.include_patterns
-            ):
-                return False
+        if self.api_config.include_patterns and not any(
+            re.match(pattern, path)
+            for pattern in self.api_config.include_patterns
+        ):
+            return False
 
-        if self.api_config.exclude_patterns:
-            if any(
-                re.match(pattern, path)
-                for pattern in self.api_config.exclude_patterns
-            ):
-                return False
-
-        return True
+        return not (self.api_config.exclude_patterns and any(re.match(pattern, path) for pattern in self.api_config.exclude_patterns))
 
     def openapi_path_to_regex(self, path: str) -> str:
         """
@@ -283,7 +278,7 @@ class OpenAPIProcessor:
         return mapping.get(method, method.lower())
 
     def generate_action_name(
-        self, path: str, method: str, operation_id: str | None = None
+        self, path: str, method: str, _operation_id: str | None = None
     ) -> str:
         """
         Generate action name from path and method.
@@ -312,7 +307,7 @@ class OpenAPIProcessor:
                     continue
 
                 operation = path_item[method]
-                operation_id = operation.get("operationId")
+                operation.get("operationId")
                 summary = operation.get("summary")
                 description = operation.get("description") or summary
 
@@ -751,7 +746,7 @@ def display_plan(changes: list[MappingChange], actions_to_create: list[str]) -> 
 
         for change in api_changes:
             if change.change_type == ChangeType.CREATE:
-                console.print(f"  [green]+[/green] CREATE mapping")
+                console.print("  [green]+[/green] CREATE mapping")
                 console.print(f"      path_pattern: {change.mapping.path_pattern}")
                 console.print(f"      method:       {change.mapping.method}")
                 console.print(f"      action:       {change.mapping.action_name}")
@@ -881,7 +876,7 @@ def validate(config: str) -> None:
     is_flag=True,
     help="Overwrite existing state file without confirmation",
 )
-def init(config: str, output: str, force: bool) -> None:
+def init(config: str, output: str, _force: bool) -> None:
     """Generate initial state file with FILL_HERE placeholders, preserving existing action names."""
     try:
         # Load existing state if present
@@ -1048,10 +1043,12 @@ def plan(config: str, state: str) -> None:
         # Find actions that need to be created
         actions_to_create = []
         for change in changes:
-            if change.change_type in [ChangeType.CREATE, ChangeType.UPDATE]:
-                if change.mapping.action_name not in existing_actions:
-                    if change.mapping.action_name not in actions_to_create:
-                        actions_to_create.append(change.mapping.action_name)
+            if (
+                change.change_type in [ChangeType.CREATE, ChangeType.UPDATE]
+                and change.mapping.action_name not in existing_actions
+                and change.mapping.action_name not in actions_to_create
+            ):
+                actions_to_create.append(change.mapping.action_name)
 
         # Display plan
         console.print()
@@ -1139,10 +1136,12 @@ def apply(config: str, state: str, auto_approve: bool) -> None:
         # Find actions that need to be created
         actions_to_create = []
         for change in changes:
-            if change.change_type in [ChangeType.CREATE, ChangeType.UPDATE]:
-                if change.mapping.action_name not in existing_actions:
-                    if change.mapping.action_name not in actions_to_create:
-                        actions_to_create.append(change.mapping.action_name)
+            if (
+                change.change_type in [ChangeType.CREATE, ChangeType.UPDATE]
+                and change.mapping.action_name not in existing_actions
+                and change.mapping.action_name not in actions_to_create
+            ):
+                actions_to_create.append(change.mapping.action_name)
 
         # Display plan
         console.print()
