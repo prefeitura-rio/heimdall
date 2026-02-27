@@ -886,9 +886,8 @@ async def assign_action_to_role(
             )
 
         # Verify action exists
-        actions = action_service.list_actions(db)
-        action_exists = any(action.name == action_data.action_name for action in actions)
-        if not action_exists:
+        action = action_service.get_action_by_name(db, action_data.action_name)
+        if not action:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Action '{action_data.action_name}' not found"
@@ -1052,9 +1051,8 @@ async def remove_action_from_role(
             )
 
         # Verify action exists
-        actions = action_service.list_actions(db)
-        action_exists = any(action.name == action_name for action in actions)
-        if not action_exists:
+        action = action_service.get_action_by_name(db, action_name)
+        if not action:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Action '{action_name}' not found"
