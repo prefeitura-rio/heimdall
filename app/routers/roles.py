@@ -25,20 +25,10 @@ router = APIRouter()
 class ActionResponse(BaseModel):
     """Response model for action information."""
 
-    id: int = Field(
-        ...,
-        description="Unique identifier for the action",
-        example=1
-    )
-    name: str = Field(
-        ...,
-        description="Action name",
-        example="user:read"
-    )
+    id: int = Field(..., description="Unique identifier for the action", example=1)
+    name: str = Field(..., description="Action name", example="user:read")
     description: str | None = Field(
-        None,
-        description="Action description",
-        example="Read user information"
+        None, description="Action description", example="Read user information"
     )
 
     class Config:
@@ -46,7 +36,7 @@ class ActionResponse(BaseModel):
             "example": {
                 "id": 1,
                 "name": "user:read",
-                "description": "Read user information"
+                "description": "Read user information",
             }
         }
 
@@ -58,42 +48,28 @@ class RoleActionRequest(BaseModel):
         ...,
         description="Name of the action to assign/remove (lowercase letters, numbers, underscores, and colons only)",
         example="user:read",
-        pattern="^[a-z0-9_:]+$"
+        pattern="^[a-z0-9_:]+$",
     )
 
     class Config:
-        json_schema_extra = {
-            "example": {
-                "action_name": "user:read"
-            }
-        }
+        json_schema_extra = {"example": {"action_name": "user:read"}}
 
 
 class RoleActionResponse(BaseModel):
     """Response model for role-action operations."""
 
     status: str = Field(
-        ...,
-        description="Status of the operation",
-        example="action_assigned"
+        ..., description="Status of the operation", example="action_assigned"
     )
-    role: str = Field(
-        ...,
-        description="Role name",
-        example="data_analyst:read"
-    )
-    action: str = Field(
-        ...,
-        description="Action name",
-        example="user:read"
-    )
+    role: str = Field(..., description="Role name", example="data_analyst:read")
+    action: str = Field(..., description="Action name", example="user:read")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "status": "action_assigned",
                 "role": "data_analyst:read",
-                "action": "user:read"
+                "action": "user:read",
             }
         }
 
@@ -108,21 +84,21 @@ class RoleCreateRequest(BaseModel):
         example="data_analyst:read",
         min_length=1,
         max_length=100,
-        pattern="^[a-z0-9_:]+$"
+        pattern="^[a-z0-9_:]+$",
     )
     description: str = Field(
         ...,
         description="Human-readable description of the role's purpose and permissions",
         example="Data analysts with read access to analytics dashboards",
         min_length=1,
-        max_length=500
+        max_length=500,
     )
 
     class Config:
         json_schema_extra = {
             "example": {
                 "name": "data_analyst:read",
-                "description": "Data analysts with read access to analytics dashboards"
+                "description": "Data analysts with read access to analytics dashboards",
             }
         }
 
@@ -130,30 +106,22 @@ class RoleCreateRequest(BaseModel):
 class RoleResponse(BaseModel):
     """Response model for role information."""
 
-    id: int = Field(
-        ...,
-        description="Unique identifier for the role",
-        example=1
-    )
-    name: str = Field(
-        ...,
-        description="Role name",
-        example="data_analyst:read"
-    )
+    id: int = Field(..., description="Unique identifier for the role", example=1)
+    name: str = Field(..., description="Role name", example="data_analyst:read")
     description: str = Field(
         ...,
         description="Role description",
-        example="Data analysts with read access to analytics dashboards"
+        example="Data analysts with read access to analytics dashboards",
     )
     created_by: str | None = Field(
         None,
         description="CPF of the user who created this role (null for system roles)",
-        example="12345678901"
+        example="12345678901",
     )
     created_at: str | None = Field(
         None,
         description="ISO timestamp when the role was created (null for system roles)",
-        example="2024-01-15T10:30:00Z"
+        example="2024-01-15T10:30:00Z",
     )
 
     class Config:
@@ -163,7 +131,7 @@ class RoleResponse(BaseModel):
                 "name": "data_analyst:read",
                 "description": "Data analysts with read access to analytics dashboards",
                 "created_by": "12345678901",
-                "created_at": "2024-01-15T10:30:00Z"
+                "created_at": "2024-01-15T10:30:00Z",
             }
         }
 
@@ -175,34 +143,28 @@ class RoleAssignRequest(BaseModel):
         ...,
         description="Name of the role to assign to the group (lowercase letters, numbers, underscores, and colons only)",
         example="data_analyst:read",
-        pattern="^[a-z0-9_:]+$"
+        pattern="^[a-z0-9_:]+$",
     )
 
     class Config:
-        json_schema_extra = {
-            "example": {
-                "role_name": "data_analyst:read"
-            }
-        }
+        json_schema_extra = {"example": {"role_name": "data_analyst:read"}}
 
 
 class RoleAssignmentResponse(BaseModel):
     """Response model for role assignment operations."""
 
     status: str = Field(
-        ...,
-        description="Status of the role assignment operation",
-        example="success"
+        ..., description="Status of the role assignment operation", example="success"
     )
     group: str = Field(
         ...,
         description="Name of the group the role was assigned to",
-        example="engineering_team:backend"
+        example="engineering_team:backend",
     )
     role: str = Field(
         ...,
         description="Name of the role that was assigned",
-        example="data_analyst:read"
+        example="data_analyst:read",
     )
 
     class Config:
@@ -210,7 +172,7 @@ class RoleAssignmentResponse(BaseModel):
             "example": {
                 "status": "success",
                 "group": "engineering_team:backend",
-                "role": "data_analyst:read"
+                "role": "data_analyst:read",
             }
         }
 
@@ -251,6 +213,7 @@ async def create_role(
 
     # Invalidate policy version to trigger near real-time sync
     from app.services.policy_invalidator import invalidate_policy_version
+
     invalidate_policy_version(db)
 
     return RoleResponse(
@@ -294,33 +257,31 @@ Maximum limit is 100 roles per request.
                                 "name": "superadmin",
                                 "description": "Super administrator with full system access",
                                 "created_by": None,
-                                "created_at": None
+                                "created_at": None,
                             },
                             {
                                 "id": 2,
                                 "name": "data_analyst:read",
                                 "description": "Data analysts with read access to analytics dashboards",
                                 "created_by": "12345678901",
-                                "created_at": "2024-01-15T10:30:00Z"
-                            }
+                                "created_at": "2024-01-15T10:30:00Z",
+                            },
                         ],
                         "total": 25,
                         "skip": 0,
                         "limit": 50,
-                        "has_more": False
+                        "has_more": False,
                     }
                 }
-            }
+            },
         },
         401: {
             "description": "Unauthorized - Invalid or missing JWT token",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Could not validate credentials"
-                    }
+                    "example": {"detail": "Could not validate credentials"}
                 }
-            }
+            },
         },
         500: {
             "description": "Internal server error",
@@ -330,16 +291,18 @@ Maximum limit is 100 roles per request.
                         "detail": "An unexpected error occurred while retrieving roles"
                     }
                 }
-            }
-        }
-    }
+            },
+        },
+    },
 )
 async def list_roles(
     _current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     role_service: Annotated[RoleService, Depends(lambda: RoleService())],
     skip: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int = Query(50, ge=1, le=100, description="Maximum number of items to return"),
+    limit: int = Query(
+        50, ge=1, le=100, description="Maximum number of items to return"
+    ),
 ):
     roles, total_count = role_service.list_roles(db=db, skip=skip, limit=limit)
 
@@ -355,10 +318,7 @@ async def list_roles(
     ]
 
     return PaginatedResponse.create(
-        items=role_responses,
-        total=total_count,
-        skip=skip,
-        limit=limit
+        items=role_responses, total=total_count, skip=skip, limit=limit
     )
 
 
@@ -393,28 +353,26 @@ Permissions are checked via Cerbos policies.
                             "name": "data_analyst:read",
                             "description": "Data analysis and reporting access",
                             "created_by": None,
-                            "created_at": None
+                            "created_at": None,
                         },
                         {
                             "id": 2,
                             "name": "team_lead:manage",
                             "description": "Team leadership and management permissions",
                             "created_by": None,
-                            "created_at": None
-                        }
+                            "created_at": None,
+                        },
                     ]
                 }
-            }
+            },
         },
         401: {
             "description": "Unauthorized - Invalid or missing JWT token",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Could not validate credentials"
-                    }
+                    "example": {"detail": "Could not validate credentials"}
                 }
-            }
+            },
         },
         403: {
             "description": "Forbidden - Insufficient permissions to view group roles",
@@ -424,17 +382,15 @@ Permissions are checked via Cerbos policies.
                         "detail": "Permission denied to view roles of group 'engineering_team:backend'"
                     }
                 }
-            }
+            },
         },
         404: {
             "description": "Group not found",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Group 'unknown-group' not found"
-                    }
+                    "example": {"detail": "Group 'unknown-group' not found"}
                 }
-            }
+            },
         },
         500: {
             "description": "Internal server error",
@@ -444,9 +400,9 @@ Permissions are checked via Cerbos policies.
                         "detail": "Failed to retrieve group roles: Database connection error"
                     }
                 }
-            }
-        }
-    }
+            },
+        },
+    },
 )
 async def list_group_roles(
     group_name: str,
@@ -472,7 +428,7 @@ async def list_group_roles(
     if not can_view:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied to view roles of group '{group_name}'"
+            detail=f"Permission denied to view roles of group '{group_name}'",
         )
 
     # Get group roles
@@ -543,6 +499,7 @@ async def assign_role_to_group(
 
         # Invalidate policy version to trigger near real-time sync
         from app.services.policy_invalidator import invalidate_policy_version
+
         invalidate_policy_version(db)
 
         return RoleAssignmentResponse(
@@ -599,15 +556,16 @@ async def remove_role_from_group(
 
         # Invalidate policy version to trigger near real-time sync
         from app.services.policy_invalidator import invalidate_policy_version
+
         invalidate_policy_version(db)
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-
 # Role-Action Management Endpoints added programmatically
 # Role-Action Management Endpoints
+
 
 @router.get(
     "/{role_name}/actions",
@@ -640,26 +598,24 @@ Permissions are checked via Cerbos policies.
                         {
                             "id": 1,
                             "name": "user:read",
-                            "description": "Read user information"
+                            "description": "Read user information",
                         },
                         {
                             "id": 2,
                             "name": "user:list",
-                            "description": "List users in the system"
-                        }
+                            "description": "List users in the system",
+                        },
                     ]
                 }
-            }
+            },
         },
         401: {
             "description": "Unauthorized - Invalid or missing JWT token",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Could not validate credentials"
-                    }
+                    "example": {"detail": "Could not validate credentials"}
                 }
-            }
+            },
         },
         403: {
             "description": "Forbidden - Insufficient permissions to view role actions",
@@ -669,17 +625,15 @@ Permissions are checked via Cerbos policies.
                         "detail": "Permission denied to view actions for role 'data_analyst:read'"
                     }
                 }
-            }
+            },
         },
         404: {
             "description": "Role not found",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Role 'unknown-role' not found"
-                    }
+                    "example": {"detail": "Role 'unknown-role' not found"}
                 }
-            }
+            },
         },
         500: {
             "description": "Internal server error",
@@ -689,9 +643,9 @@ Permissions are checked via Cerbos policies.
                         "detail": "Failed to retrieve role actions: Policy service error"
                     }
                 }
-            }
-        }
-    }
+            },
+        },
+    },
 )
 async def list_role_actions(
     role_name: str,
@@ -718,7 +672,7 @@ async def list_role_actions(
     if not can_view:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied to view actions for role '{role_name}'"
+            detail=f"Permission denied to view actions for role '{role_name}'",
         )
 
     # Check if role exists
@@ -728,7 +682,7 @@ async def list_role_actions(
         if not role_exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Role '{role_name}' not found"
+                detail=f"Role '{role_name}' not found",
             )
 
         # Get role-specific actions from the database
@@ -748,7 +702,7 @@ async def list_role_actions(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve role actions: {str(e)}"
+            detail=f"Failed to retrieve role actions: {str(e)}",
         )
 
 
@@ -782,30 +736,26 @@ Permissions are checked via Cerbos policies.
                     "example": {
                         "status": "action_assigned",
                         "role": "data_analyst:read",
-                        "action": "user:read"
+                        "action": "user:read",
                     }
                 }
-            }
+            },
         },
         400: {
             "description": "Bad request - Invalid action name or role already has permission",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Role already has permission for this action"
-                    }
+                    "example": {"detail": "Role already has permission for this action"}
                 }
-            }
+            },
         },
         401: {
             "description": "Unauthorized - Invalid or missing JWT token",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Could not validate credentials"
-                    }
+                    "example": {"detail": "Could not validate credentials"}
                 }
-            }
+            },
         },
         403: {
             "description": "Forbidden - Insufficient permissions to modify role actions",
@@ -815,17 +765,15 @@ Permissions are checked via Cerbos policies.
                         "detail": "Permission denied to modify actions for role 'data_analyst:read'"
                     }
                 }
-            }
+            },
         },
         404: {
             "description": "Role or action not found",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Role 'unknown-role' not found"
-                    }
+                    "example": {"detail": "Role 'unknown-role' not found"}
                 }
-            }
+            },
         },
         500: {
             "description": "Internal server error",
@@ -835,9 +783,9 @@ Permissions are checked via Cerbos policies.
                         "detail": "Failed to assign action to role: Policy service error"
                     }
                 }
-            }
-        }
-    }
+            },
+        },
+    },
 )
 async def assign_action_to_role(
     role_name: str,
@@ -854,7 +802,7 @@ async def assign_action_to_role(
     if role_name == "superadmin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot modify superadmin role: it is protected and has wildcard permissions"
+            detail="Cannot modify superadmin role: it is protected and has wildcard permissions",
         )
 
     # Get caller's roles for permission check
@@ -872,7 +820,7 @@ async def assign_action_to_role(
     if not can_modify:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied to modify actions for role '{role_name}'"
+            detail=f"Permission denied to modify actions for role '{role_name}'",
         )
 
     try:
@@ -882,7 +830,7 @@ async def assign_action_to_role(
         if not role_exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Role '{role_name}' not found"
+                detail=f"Role '{role_name}' not found",
             )
 
         # Verify action exists
@@ -890,7 +838,7 @@ async def assign_action_to_role(
         if not action:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Action '{action_data.action_name}' not found"
+                detail=f"Action '{action_data.action_name}' not found",
             )
 
         # Assign action to role using the database
@@ -898,23 +846,22 @@ async def assign_action_to_role(
             db=db,
             role_name=role_name,
             action_name=action_data.action_name,
-            assigned_by=current_user
+            assigned_by=current_user,
         )
 
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to assign action to role"
+                detail="Failed to assign action to role",
             )
 
         # Invalidate policy version to trigger near real-time sync
         from app.services.policy_invalidator import invalidate_policy_version
+
         invalidate_policy_version(db)
 
         return RoleActionResponse(
-            status="action_assigned",
-            role=role_name,
-            action=action_data.action_name
+            status="action_assigned", role=role_name, action=action_data.action_name
         )
 
     except HTTPException:
@@ -922,7 +869,7 @@ async def assign_action_to_role(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to assign action to role: {str(e)}"
+            detail=f"Failed to assign action to role: {str(e)}",
         )
 
 
@@ -949,9 +896,7 @@ Permissions are checked via Cerbos policies.
 **Note**: This endpoint manages role permissions through Cerbos policy configuration.
     """,
     responses={
-        204: {
-            "description": "Action permission removed from role successfully"
-        },
+        204: {"description": "Action permission removed from role successfully"},
         400: {
             "description": "Bad request - Role doesn't have this action permission",
             "content": {
@@ -960,17 +905,15 @@ Permissions are checked via Cerbos policies.
                         "detail": "Role doesn't have permission for this action"
                     }
                 }
-            }
+            },
         },
         401: {
             "description": "Unauthorized - Invalid or missing JWT token",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Could not validate credentials"
-                    }
+                    "example": {"detail": "Could not validate credentials"}
                 }
-            }
+            },
         },
         403: {
             "description": "Forbidden - Insufficient permissions to modify role actions",
@@ -980,17 +923,15 @@ Permissions are checked via Cerbos policies.
                         "detail": "Permission denied to modify actions for role 'data_analyst:read'"
                     }
                 }
-            }
+            },
         },
         404: {
             "description": "Role or action not found",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Role 'unknown-role' not found"
-                    }
+                    "example": {"detail": "Role 'unknown-role' not found"}
                 }
-            }
+            },
         },
         500: {
             "description": "Internal server error",
@@ -1000,9 +941,9 @@ Permissions are checked via Cerbos policies.
                         "detail": "Failed to remove action from role: Policy service error"
                     }
                 }
-            }
-        }
-    }
+            },
+        },
+    },
 )
 async def remove_action_from_role(
     role_name: str,
@@ -1019,7 +960,7 @@ async def remove_action_from_role(
     if role_name == "superadmin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot modify superadmin role: it is protected and has wildcard permissions"
+            detail="Cannot modify superadmin role: it is protected and has wildcard permissions",
         )
 
     # Get caller's roles for permission check
@@ -1037,7 +978,7 @@ async def remove_action_from_role(
     if not can_modify:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied to modify actions for role '{role_name}'"
+            detail=f"Permission denied to modify actions for role '{role_name}'",
         )
 
     try:
@@ -1047,7 +988,7 @@ async def remove_action_from_role(
         if not role_exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Role '{role_name}' not found"
+                detail=f"Role '{role_name}' not found",
             )
 
         # Verify action exists
@@ -1055,25 +996,23 @@ async def remove_action_from_role(
         if not action:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Action '{action_name}' not found"
+                detail=f"Action '{action_name}' not found",
             )
 
         # Remove action from role using the database
         success = role_service.remove_action_from_role(
-            db=db,
-            role_name=role_name,
-            action_name=action_name,
-            removed_by=current_user
+            db=db, role_name=role_name, action_name=action_name, removed_by=current_user
         )
 
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to remove action from role"
+                detail="Failed to remove action from role",
             )
 
         # Invalidate policy version to trigger near real-time sync
         from app.services.policy_invalidator import invalidate_policy_version
+
         invalidate_policy_version(db)
 
         # No return value for 204 status code
@@ -1083,7 +1022,7 @@ async def remove_action_from_role(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to remove action from role: {str(e)}"
+            detail=f"Failed to remove action from role: {str(e)}",
         )
 
 
@@ -1111,9 +1050,7 @@ Permissions are checked via Cerbos policies.
 **Safety**: Role deletion is irreversible. Ensure the role is no longer needed before deletion.
     """,
     responses={
-        204: {
-            "description": "Role deleted successfully"
-        },
+        204: {"description": "Role deleted successfully"},
         403: {
             "description": "Forbidden - Insufficient permissions to delete role",
             "content": {
@@ -1122,17 +1059,15 @@ Permissions are checked via Cerbos policies.
                         "detail": "Permission denied to delete role 'data_analyst:read'"
                     }
                 }
-            }
+            },
         },
         404: {
             "description": "Role not found",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Role 'unknown-role' not found"
-                    }
+                    "example": {"detail": "Role 'unknown-role' not found"}
                 }
-            }
+            },
         },
         409: {
             "description": "Conflict - Role is still in use",
@@ -1142,7 +1077,7 @@ Permissions are checked via Cerbos policies.
                         "detail": "Cannot delete role 'superadmin': still assigned to 3 groups"
                     }
                 }
-            }
+            },
         },
         500: {
             "description": "Internal server error",
@@ -1152,9 +1087,9 @@ Permissions are checked via Cerbos policies.
                         "detail": "Failed to delete role: Database transaction error"
                     }
                 }
-            }
-        }
-    }
+            },
+        },
+    },
 )
 async def delete_role(
     role_name: str,
@@ -1174,14 +1109,14 @@ async def delete_role(
         if not role:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Role '{role_name}' not found"
+                detail=f"Role '{role_name}' not found",
             )
 
         # Protect superadmin role from deletion
         if role_name == "superadmin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot delete superadmin role: it is protected and immutable"
+                detail="Cannot delete superadmin role: it is protected and immutable",
             )
 
         # Check permission to delete this role
@@ -1190,13 +1125,13 @@ async def delete_role(
             caller_roles=caller_roles,
             action="role:delete",
             resource_type="role",
-            resource_attrs={"name": role_name}
+            resource_attrs={"name": role_name},
         )
 
         if not is_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied to delete role '{role_name}'"
+                detail=f"Permission denied to delete role '{role_name}'",
             )
 
         # Check if role is still assigned to groups (safety check)
@@ -1205,7 +1140,7 @@ async def delete_role(
             group_names = [group["name"] for group in groups_with_role]
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Cannot delete role '{role_name}': still assigned to groups: {', '.join(group_names)}"
+                detail=f"Cannot delete role '{role_name}': still assigned to groups: {', '.join(group_names)}",
             )
 
         # Delete the role
@@ -1213,6 +1148,7 @@ async def delete_role(
 
         # Invalidate policy version to trigger near real-time sync
         from app.services.policy_invalidator import invalidate_policy_version
+
         invalidate_policy_version(db)
 
         # No return value for 204 status code
@@ -1222,5 +1158,5 @@ async def delete_role(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete role: {str(e)}"
+            detail=f"Failed to delete role: {str(e)}",
         )
