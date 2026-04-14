@@ -68,6 +68,7 @@ console = Console()
 @dataclass
 class SyncStats:
     """Statistics for sync operation."""
+
     actions_created: int = 0
     actions_updated: int = 0
     actions_deleted: int = 0
@@ -85,15 +86,25 @@ class SyncStats:
     def total_changes(self) -> int:
         """Calculate total number of changes."""
         return (
-            self.actions_created + self.actions_updated + self.actions_deleted +
-            self.roles_created + self.roles_updated + self.roles_deleted +
-            self.mappings_created + self.mappings_updated + self.mappings_deleted +
-            self.groups_created + self.groups_updated + self.groups_deleted
+            self.actions_created
+            + self.actions_updated
+            + self.actions_deleted
+            + self.roles_created
+            + self.roles_updated
+            + self.roles_deleted
+            + self.mappings_created
+            + self.mappings_updated
+            + self.mappings_deleted
+            + self.groups_created
+            + self.groups_updated
+            + self.groups_deleted
         )
 
     def print_summary(self):
         """Print sync summary."""
-        table = Table(title="📊 Sync Summary", show_header=True, header_style="bold magenta")
+        table = Table(
+            title="📊 Sync Summary", show_header=True, header_style="bold magenta"
+        )
 
         table.add_column("Entity", style="cyan", no_wrap=True)
         table.add_column("Created", style="green", justify="right")
@@ -141,7 +152,13 @@ class SyncStats:
 
         if self.errors > 0:
             table.add_section()
-            table.add_row("[bold red]ERRORS[/bold red]", "", "", "", f"[bold red]{self.errors}[/bold red]")
+            table.add_row(
+                "[bold red]ERRORS[/bold red]",
+                "",
+                "",
+                "",
+                f"[bold red]{self.errors}[/bold red]",
+            )
 
         console.print("\n")
         console.print(table)
@@ -151,7 +168,7 @@ class HeimdallClient:
     """Client for Heimdall Admin API."""
 
     def __init__(self, base_url: str, token: str):
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
         self.token = token
         self.session = self._create_session()
 
@@ -164,7 +181,7 @@ class HeimdallClient:
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "POST", "PUT", "DELETE"]
+            allowed_methods=["GET", "POST", "PUT", "DELETE"],
         )
 
         adapter = HTTPAdapter(max_retries=retry_strategy)
@@ -172,10 +189,12 @@ class HeimdallClient:
         session.mount("https://", adapter)
 
         # Set default headers
-        session.headers.update({
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json"
-        })
+        session.headers.update(
+            {
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            }
+        )
 
         return session
 
@@ -195,7 +214,7 @@ class HeimdallClient:
         except requests.exceptions.RequestException as e:
             print(f"ERROR: Request failed: {method} {url}")
             print(f"  {str(e)}")
-            if hasattr(e, 'response') and e.response is not None:
+            if hasattr(e, "response") and e.response is not None:
                 print(f"  Response: {e.response.text}")
             raise
 
@@ -261,7 +280,9 @@ class HeimdallClient:
             # Silently return empty list on error (group may not exist or have no roles)
             return []
 
-    def create_action(self, name: str, description: str | None = None) -> dict[str, Any]:
+    def create_action(
+        self, name: str, description: str | None = None
+    ) -> dict[str, Any]:
         """Create an action."""
         data = {"name": name}
         if description:
@@ -297,7 +318,11 @@ class HeimdallClient:
 
     def assign_action_to_role(self, role_name: str, action_name: str) -> None:
         """Assign an action to a role."""
-        self._request("POST", f"/api/v1/roles/{role_name}/actions", json={"action_name": action_name})
+        self._request(
+            "POST",
+            f"/api/v1/roles/{role_name}/actions",
+            json={"action_name": action_name},
+        )
 
     def remove_action_from_role(self, role_name: str, action_name: str) -> None:
         """Remove an action from a role."""
@@ -312,7 +337,9 @@ class HeimdallClient:
                 return action
         return None
 
-    def create_mapping(self, path_pattern: str, method: str, action_name: str) -> dict[str, Any]:
+    def create_mapping(
+        self, path_pattern: str, method: str, action_name: str
+    ) -> dict[str, Any]:
         """Create a mapping."""
         # Look up action ID by name
         action = self.get_action_by_name(action_name)
@@ -322,7 +349,7 @@ class HeimdallClient:
         data = {
             "path_pattern": path_pattern,
             "method": method,
-            "action_id": action["id"]
+            "action_id": action["id"],
         }
         return self._request("POST", "/api/v1/mappings/", json=data)
 
@@ -353,13 +380,17 @@ class HeimdallClient:
         data = {"description": description}
         return self._request("PUT", f"/api/v1/groups/{group_id}", json=data)
 
-    def delete_group(self, group_id: int) -> None:
+    def delete_group(self, group_name: str) -> None:
         """Delete a group."""
-        self._request("DELETE", f"/api/v1/groups/{group_id}")
+        self._request("DELETE", f"/api/v1/groups/{group_name}")
 
     def assign_role_to_group(self, group_name: str, role_name: str) -> None:
         """Assign a role to a group."""
-        self._request("POST", f"/api/v1/roles/groups/{group_name}/roles", json={"role_name": role_name})
+        self._request(
+            "POST",
+            f"/api/v1/roles/groups/{group_name}/roles",
+            json={"role_name": role_name},
+        )
 
     def remove_role_from_group(self, group_name: str, role_name: str) -> None:
         """Remove a role from a group."""
@@ -382,7 +413,7 @@ class HeimdallClient:
             "user_info": None,
             "has_superadmin": False,
             "can_write": False,
-            "errors": []
+            "errors": [],
         }
 
         try:
@@ -423,8 +454,8 @@ class HeimdallClient:
                 "/api/v1/actions/",
                 json={
                     "name": test_action_name,
-                    "description": "Temporary action for healthcheck - safe to delete"
-                }
+                    "description": "Temporary action for healthcheck - safe to delete",
+                },
             )
 
             # Delete test action
@@ -446,7 +477,7 @@ class EnvironmentSynchronizer:
         source: HeimdallClient,
         target: HeimdallClient,
         dry_run: bool = False,
-        checkpoint_file: Path | None = None
+        checkpoint_file: Path | None = None,
     ):
         self.source = source
         self.target = target
@@ -478,10 +509,10 @@ class EnvironmentSynchronizer:
         self.checkpoint = {
             "timestamp": datetime.now().isoformat(),
             "stage": stage,
-            "data": data
+            "data": data,
         }
 
-        with open(self.checkpoint_file, 'w') as f:
+        with open(self.checkpoint_file, "w") as f:
             json.dump(self.checkpoint, f, indent=2)
 
     def clear_checkpoint(self):
@@ -497,11 +528,17 @@ class EnvironmentSynchronizer:
         # Fetch all actions
         with console.status("[bold green]Fetching actions from source..."):
             source_actions = {a["name"]: a for a in self.source.get_all_actions()}
-        console.print(f"  ✓ Found [bold]{len(source_actions)}[/bold] actions in source", style="green")
+        console.print(
+            f"  ✓ Found [bold]{len(source_actions)}[/bold] actions in source",
+            style="green",
+        )
 
         with console.status("[bold green]Fetching actions from target..."):
             target_actions = {a["name"]: a for a in self.target.get_all_actions()}
-        console.print(f"  ✓ Found [bold]{len(target_actions)}[/bold] actions in target", style="green")
+        console.print(
+            f"  ✓ Found [bold]{len(target_actions)}[/bold] actions in target",
+            style="green",
+        )
 
         # Create ID mapping for later use
         action_id_map = {}
@@ -509,8 +546,11 @@ class EnvironmentSynchronizer:
         # Calculate operations
         to_create = [name for name in source_actions if name not in target_actions]
         to_update = [
-            name for name in source_actions
-            if name in target_actions and source_actions[name].get("description") != target_actions[name].get("description")
+            name
+            for name in source_actions
+            if name in target_actions
+            and source_actions[name].get("description")
+            != target_actions[name].get("description")
         ]
         to_delete = [name for name in target_actions if name not in source_actions]
 
@@ -519,20 +559,26 @@ class EnvironmentSynchronizer:
         if total_ops == 0:
             console.print("  ℹ No changes needed", style="dim")
         else:
-            console.print(f"\n  [green]+{len(to_create)}[/green] to create | [yellow]~{len(to_update)}[/yellow] to update | [red]-{len(to_delete)}[/red] to delete\n")
+            console.print(
+                f"\n  [green]+{len(to_create)}[/green] to create | [yellow]~{len(to_update)}[/yellow] to update | [red]-{len(to_delete)}[/red] to delete\n"
+            )
 
             # Create missing actions with progress
             if to_create:
                 with self.create_progress() as progress:
-                    task = progress.add_task("[green]Creating actions...", total=len(to_create))
+                    task = progress.add_task(
+                        "[green]Creating actions...", total=len(to_create)
+                    )
                     for name in to_create:
                         source_action = source_actions[name]
-                        console.print(f"  [green]+[/green] Creating action '[cyan]{name}[/cyan]'")
+                        console.print(
+                            f"  [green]+[/green] Creating action '[cyan]{name}[/cyan]'"
+                        )
                         if not self.dry_run:
                             try:
                                 new_action = self.target.create_action(
                                     name=name,
-                                    description=source_action.get("description")
+                                    description=source_action.get("description"),
                                 )
                                 action_id_map[source_action["id"]] = new_action["id"]
                                 self.stats.actions_created += 1
@@ -546,18 +592,22 @@ class EnvironmentSynchronizer:
             # Update actions with progress
             if to_update:
                 with self.create_progress() as progress:
-                    task = progress.add_task("[yellow]Updating actions...", total=len(to_update))
+                    task = progress.add_task(
+                        "[yellow]Updating actions...", total=len(to_update)
+                    )
                     for name in to_update:
                         source_action = source_actions[name]
                         target_action = target_actions[name]
                         action_id_map[source_action["id"]] = target_action["id"]
 
-                        console.print(f"  [yellow]~[/yellow] Updating action '[cyan]{name}[/cyan]' description")
+                        console.print(
+                            f"  [yellow]~[/yellow] Updating action '[cyan]{name}[/cyan]' description"
+                        )
                         if not self.dry_run:
                             try:
                                 self.target.update_action(
                                     target_action["id"],
-                                    source_action.get("description")
+                                    source_action.get("description"),
                                 )
                                 self.stats.actions_updated += 1
                             except Exception as e:
@@ -570,10 +620,14 @@ class EnvironmentSynchronizer:
             # Delete extra actions with progress
             if to_delete:
                 with self.create_progress() as progress:
-                    task = progress.add_task("[red]Deleting actions...", total=len(to_delete))
+                    task = progress.add_task(
+                        "[red]Deleting actions...", total=len(to_delete)
+                    )
                     for name in to_delete:
                         target_action = target_actions[name]
-                        console.print(f"  [red]-[/red] Deleting action '[cyan]{name}[/cyan]'")
+                        console.print(
+                            f"  [red]-[/red] Deleting action '[cyan]{name}[/cyan]'"
+                        )
                         if not self.dry_run:
                             try:
                                 self.target.delete_action(target_action["id"])
@@ -598,9 +652,9 @@ class EnvironmentSynchronizer:
 
     def sync_roles(self, action_id_map: dict[int, int]):  # noqa: ARG002
         """Sync roles and role-action assignments from source to target."""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("SYNCING ROLES")
-        print("="*60)
+        print("=" * 60)
 
         # Fetch all roles
         print("Fetching roles from source...")
@@ -633,8 +687,7 @@ class EnvironmentSynchronizer:
                 if not self.dry_run:
                     try:
                         new_role = self.target.create_role(
-                            name=name,
-                            description=source_role.get("description")
+                            name=name, description=source_role.get("description")
                         )
                         role_id_map[source_role["id"]] = new_role["id"]
                         self.stats.roles_created += 1
@@ -653,8 +706,7 @@ class EnvironmentSynchronizer:
                     if not self.dry_run:
                         try:
                             self.target.update_role(
-                                target_role["id"],
-                                source_role.get("description")
+                                target_role["id"], source_role.get("description")
                             )
                             self.stats.roles_updated += 1
                         except Exception as e:
@@ -723,41 +775,70 @@ class EnvironmentSynchronizer:
 
         # Fetch all mappings
         with console.status("[bold green]Fetching mappings from source..."):
-            source_mappings = {(m["path_pattern"], m["method"]): m for m in self.source.get_all_mappings()}
-        console.print(f"  ✓ Found [bold]{len(source_mappings)}[/bold] mappings in source", style="green")
+            source_mappings = {
+                (m["path_pattern"], m["method"]): m
+                for m in self.source.get_all_mappings()
+            }
+        console.print(
+            f"  ✓ Found [bold]{len(source_mappings)}[/bold] mappings in source",
+            style="green",
+        )
 
         with console.status("[bold green]Fetching mappings from target..."):
-            target_mappings = {(m["path_pattern"], m["method"]): m for m in self.target.get_all_mappings()}
-        console.print(f"  ✓ Found [bold]{len(target_mappings)}[/bold] mappings in target", style="green")
+            target_mappings = {
+                (m["path_pattern"], m["method"]): m
+                for m in self.target.get_all_mappings()
+            }
+        console.print(
+            f"  ✓ Found [bold]{len(target_mappings)}[/bold] mappings in target",
+            style="green",
+        )
 
         # Calculate operations
-        to_create = [(path, method) for (path, method) in source_mappings if (path, method) not in target_mappings]
-        to_update = [
-            (path, method) for (path, method) in source_mappings
-            if (path, method) in target_mappings and source_mappings[(path, method)]["action"] != target_mappings[(path, method)]["action"]
+        to_create = [
+            (path, method)
+            for (path, method) in source_mappings
+            if (path, method) not in target_mappings
         ]
-        to_delete = [(path, method) for (path, method) in target_mappings if (path, method) not in source_mappings]
+        to_update = [
+            (path, method)
+            for (path, method) in source_mappings
+            if (path, method) in target_mappings
+            and source_mappings[(path, method)]["action"]
+            != target_mappings[(path, method)]["action"]
+        ]
+        to_delete = [
+            (path, method)
+            for (path, method) in target_mappings
+            if (path, method) not in source_mappings
+        ]
 
         total_ops = len(to_create) + len(to_update) + len(to_delete)
 
         if total_ops == 0:
             console.print("  ℹ No changes needed", style="dim")
         else:
-            console.print(f"\n  [green]+{len(to_create)}[/green] to create | [yellow]~{len(to_update)}[/yellow] to update | [red]-{len(to_delete)}[/red] to delete\n")
+            console.print(
+                f"\n  [green]+{len(to_create)}[/green] to create | [yellow]~{len(to_update)}[/yellow] to update | [red]-{len(to_delete)}[/red] to delete\n"
+            )
 
             # Create missing mappings
             if to_create:
                 with self.create_progress() as progress:
-                    task = progress.add_task("[green]Creating mappings...", total=len(to_create))
-                    for (path, method) in to_create:
+                    task = progress.add_task(
+                        "[green]Creating mappings...", total=len(to_create)
+                    )
+                    for path, method in to_create:
                         source_mapping = source_mappings[(path, method)]
-                        console.print(f"  [green]+[/green] Creating mapping [cyan]{method} {path}[/cyan] → [yellow]{source_mapping['action']}[/yellow]")
+                        console.print(
+                            f"  [green]+[/green] Creating mapping [cyan]{method} {path}[/cyan] → [yellow]{source_mapping['action']}[/yellow]"
+                        )
                         if not self.dry_run:
                             try:
                                 self.target.create_mapping(
                                     path_pattern=path,
                                     method=method,
-                                    action_name=source_mapping["action"]
+                                    action_name=source_mapping["action"],
                                 )
                                 self.stats.mappings_created += 1
                             except Exception as e:
@@ -770,16 +851,19 @@ class EnvironmentSynchronizer:
             # Update mappings
             if to_update:
                 with self.create_progress() as progress:
-                    task = progress.add_task("[yellow]Updating mappings...", total=len(to_update))
-                    for (path, method) in to_update:
+                    task = progress.add_task(
+                        "[yellow]Updating mappings...", total=len(to_update)
+                    )
+                    for path, method in to_update:
                         source_mapping = source_mappings[(path, method)]
                         target_mapping = target_mappings[(path, method)]
-                        console.print(f"  [yellow]~[/yellow] Updating mapping [cyan]{method} {path}[/cyan]: [dim]{target_mapping['action']}[/dim] → [yellow]{source_mapping['action']}[/yellow]")
+                        console.print(
+                            f"  [yellow]~[/yellow] Updating mapping [cyan]{method} {path}[/cyan]: [dim]{target_mapping['action']}[/dim] → [yellow]{source_mapping['action']}[/yellow]"
+                        )
                         if not self.dry_run:
                             try:
                                 self.target.update_mapping(
-                                    target_mapping["id"],
-                                    source_mapping["action"]
+                                    target_mapping["id"], source_mapping["action"]
                                 )
                                 self.stats.mappings_updated += 1
                             except Exception as e:
@@ -792,10 +876,14 @@ class EnvironmentSynchronizer:
             # Delete extra mappings
             if to_delete:
                 with self.create_progress() as progress:
-                    task = progress.add_task("[red]Deleting mappings...", total=len(to_delete))
-                    for (path, method) in to_delete:
+                    task = progress.add_task(
+                        "[red]Deleting mappings...", total=len(to_delete)
+                    )
+                    for path, method in to_delete:
                         target_mapping = target_mappings[(path, method)]
-                        console.print(f"  [red]-[/red] Deleting mapping [cyan]{method} {path}[/cyan] → [dim]{target_mapping['action']}[/dim]")
+                        console.print(
+                            f"  [red]-[/red] Deleting mapping [cyan]{method} {path}[/cyan] → [dim]{target_mapping['action']}[/dim]"
+                        )
                         if not self.dry_run:
                             try:
                                 self.target.delete_mapping(target_mapping["id"])
@@ -812,9 +900,9 @@ class EnvironmentSynchronizer:
 
     def sync_groups(self, role_id_map: dict[int, int]):  # noqa: ARG002
         """Sync groups and group-role assignments from source to target."""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("SYNCING GROUPS")
-        print("="*60)
+        print("=" * 60)
 
         # Fetch all groups
         print("Fetching groups from source...")
@@ -847,8 +935,7 @@ class EnvironmentSynchronizer:
                 if not self.dry_run:
                     try:
                         new_group = self.target.create_group(
-                            name=name,
-                            description=source_group.get("description")
+                            name=name, description=source_group.get("description")
                         )
                         group_id_map[source_group["id"]] = new_group["id"]
                         self.stats.groups_created += 1
@@ -867,8 +954,7 @@ class EnvironmentSynchronizer:
                     if not self.dry_run:
                         try:
                             self.target.update_group(
-                                target_group["id"],
-                                source_group.get("description")
+                                target_group["id"], source_group.get("description")
                             )
                             self.stats.groups_updated += 1
                         except Exception as e:
@@ -883,7 +969,7 @@ class EnvironmentSynchronizer:
                 print(f"  [DELETE] Group '{name}'")
                 if not self.dry_run:
                     try:
-                        self.target.delete_group(target_group["id"])
+                        self.target.delete_group(target_group["name"])
                         self.stats.groups_deleted += 1
                     except Exception as e:
                         print(f"    ERROR: {e}")
@@ -955,7 +1041,9 @@ class EnvironmentSynchronizer:
 
         if source_health["user_info"]:
             user_cpf = source_health["user_info"].get("cpf", "unknown")
-            console.print(f"  [green]✓[/green] Authentication valid (user: [cyan]{user_cpf}[/cyan])")
+            console.print(
+                f"  [green]✓[/green] Authentication valid (user: [cyan]{user_cpf}[/cyan])"
+            )
         else:
             console.print("  [red]✗[/red] Authentication failed")
             all_healthy = False
@@ -990,7 +1078,9 @@ class EnvironmentSynchronizer:
 
         if target_health["user_info"]:
             user_cpf = target_health["user_info"].get("cpf", "unknown")
-            console.print(f"  [green]✓[/green] Authentication valid (user: [cyan]{user_cpf}[/cyan])")
+            console.print(
+                f"  [green]✓[/green] Authentication valid (user: [cyan]{user_cpf}[/cyan])"
+            )
         else:
             console.print("  [red]✗[/red] Authentication failed")
             all_healthy = False
@@ -1013,10 +1103,17 @@ class EnvironmentSynchronizer:
         console.print()
 
         if not all_healthy:
-            console.print(Panel.fit("❌ Healthcheck FAILED - cannot proceed with sync\nPlease fix the issues above and try again.", style="bold red"))
+            console.print(
+                Panel.fit(
+                    "❌ Healthcheck FAILED - cannot proceed with sync\nPlease fix the issues above and try again.",
+                    style="bold red",
+                )
+            )
             return False
 
-        console.print(Panel.fit("✅ Healthcheck PASSED - ready to sync", style="bold green"))
+        console.print(
+            Panel.fit("✅ Healthcheck PASSED - ready to sync", style="bold green")
+        )
         return True
 
     def sync(self):
@@ -1039,11 +1136,13 @@ class EnvironmentSynchronizer:
 
         if not self.dry_run:
             console.print("\n")
-            console.print(Panel.fit(
-                "⚠️  WARNING: This will modify the target environment!\n"
-                "Press Ctrl+C within 5 seconds to cancel...",
-                style="bold yellow"
-            ))
+            console.print(
+                Panel.fit(
+                    "⚠️  WARNING: This will modify the target environment!\n"
+                    "Press Ctrl+C within 5 seconds to cancel...",
+                    style="bold yellow",
+                )
+            )
             try:
                 for i in range(5, 0, -1):
                     console.print(f"  Starting in {i}...", style="yellow")
@@ -1067,84 +1166,86 @@ class EnvironmentSynchronizer:
 
         except KeyboardInterrupt:
             console.print("\n")
-            console.print(Panel.fit(
-                f"⏸️  Sync interrupted by user\n\n"
-                f"Checkpoint saved to: [cyan]{self.checkpoint_file}[/cyan]\n"
-                f"Run with [yellow]--resume[/yellow] to continue from checkpoint.",
-                style="bold yellow"
-            ))
+            console.print(
+                Panel.fit(
+                    f"⏸️  Sync interrupted by user\n\n"
+                    f"Checkpoint saved to: [cyan]{self.checkpoint_file}[/cyan]\n"
+                    f"Run with [yellow]--resume[/yellow] to continue from checkpoint.",
+                    style="bold yellow",
+                )
+            )
             sys.exit(1)
 
         except Exception as e:
             console.print("\n")
-            console.print(Panel.fit(
-                f"❌ Sync failed: [red]{e}[/red]\n\n"
-                f"Checkpoint saved to: [cyan]{self.checkpoint_file}[/cyan]\n"
-                f"Run with [yellow]--resume[/yellow] to continue from checkpoint.",
-                style="bold red"
-            ))
+            console.print(
+                Panel.fit(
+                    f"❌ Sync failed: [red]{e}[/red]\n\n"
+                    f"Checkpoint saved to: [cyan]{self.checkpoint_file}[/cyan]\n"
+                    f"Run with [yellow]--resume[/yellow] to continue from checkpoint.",
+                    style="bold red",
+                )
+            )
             raise
 
         # Print summary
         elapsed = time.time() - start_time
         self.stats.print_summary()
 
-        console.print(f"\n⏱️  Completed in [bold]{elapsed:.2f}[/bold] seconds", style="dim")
+        console.print(
+            f"\n⏱️  Completed in [bold]{elapsed:.2f}[/bold] seconds", style="dim"
+        )
 
         if self.dry_run:
             console.print("\n")
-            console.print(Panel.fit(
-                "⚠️  This was a DRY RUN - no changes were made.\n"
-                "Run without [yellow]--dry-run[/yellow] to apply changes.",
-                style="bold yellow"
-            ))
+            console.print(
+                Panel.fit(
+                    "⚠️  This was a DRY RUN - no changes were made.\n"
+                    "Run without [yellow]--dry-run[/yellow] to apply changes.",
+                    style="bold yellow",
+                )
+            )
         else:
             console.print("\n")
-            console.print(Panel.fit("✅ Sync completed successfully!", style="bold green"))
+            console.print(
+                Panel.fit("✅ Sync completed successfully!", style="bold green")
+            )
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Synchronize Heimdall environments",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
 
     parser.add_argument(
         "--source-url",
         required=True,
-        help="Source environment base URL (e.g., https://staging.api.com)"
+        help="Source environment base URL (e.g., https://staging.api.com)",
     )
     parser.add_argument(
-        "--source-token",
-        required=True,
-        help="Source environment API token"
+        "--source-token", required=True, help="Source environment API token"
     )
     parser.add_argument(
         "--target-url",
         required=True,
-        help="Target environment base URL (e.g., https://prod.api.com)"
+        help="Target environment base URL (e.g., https://prod.api.com)",
     )
     parser.add_argument(
-        "--target-token",
-        required=True,
-        help="Target environment API token"
+        "--target-token", required=True, help="Target environment API token"
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview changes without applying them"
+        "--dry-run", action="store_true", help="Preview changes without applying them"
     )
     parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume from previous checkpoint"
+        "--resume", action="store_true", help="Resume from previous checkpoint"
     )
     parser.add_argument(
         "--checkpoint-file",
         type=Path,
         default=Path("sync_checkpoint.json"),
-        help="Path to checkpoint file (default: sync_checkpoint.json)"
+        help="Path to checkpoint file (default: sync_checkpoint.json)",
     )
 
     args = parser.parse_args()
@@ -1158,7 +1259,7 @@ def main():
         source=source,
         target=target,
         dry_run=args.dry_run,
-        checkpoint_file=args.checkpoint_file
+        checkpoint_file=args.checkpoint_file,
     )
 
     # Run sync
