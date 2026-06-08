@@ -9,10 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from sqlalchemy import exists
+
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import User
+from app.models import Membership, User
 from app.services.user import UserService
 
 router = APIRouter()
@@ -134,14 +136,22 @@ async def list_users(
     user_service: Annotated[UserService, Depends(lambda: UserService())],
     skip: int = Query(0, ge=0, description="Number of users to skip"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of users to return"),
+    has_groups: bool = Query(False, description="Only return users with at least one group membership"),
 ) -> PaginatedResponse[UserResponse]:
     """List all users with pagination."""
     try:
+        if has_groups:
+            base_query = db.query(User).filter(
+                exists().where(Membership.user_id == User.id)
+            )
+        else:
+            base_query = db.query(User)
+
         # Get total count
-        total = db.query(User).count()
+        total = base_query.count()
 
         # Get paginated users
-        users = db.query(User).offset(skip).limit(limit).all()
+        users = base_query.offset(skip).limit(limit).all()
 
         # Build response items
         items = []
