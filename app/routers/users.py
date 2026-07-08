@@ -7,9 +7,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-
 from sqlalchemy import exists
+from sqlalchemy.orm import Session
 
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
