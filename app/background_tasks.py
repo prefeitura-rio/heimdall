@@ -4,6 +4,9 @@ Implements reconciliation and sync retry tasks using APScheduler.
 """
 
 import asyncio
+import hashlib
+import json
+import random
 import signal
 import sys
 from datetime import datetime, timedelta
@@ -23,9 +26,10 @@ from app.logging_config import (  # noqa: E402
     get_structured_logger,
     setup_structured_logging,
 )
-from app.models import FailedOperation, User  # noqa: E402
+from app.models import Action, FailedOperation, Role, RoleAction, User  # noqa: E402
 from app.services.audit import AuditService  # noqa: E402
 from app.services.base import BaseService  # noqa: E402
+from app.services.cache import CacheService  # noqa: E402
 from app.services.cerbos import CerbosService  # noqa: E402
 from app.services.health_monitor import HealthMonitor  # noqa: E402
 from app.services.user import UserService  # noqa: E402
@@ -35,6 +39,67 @@ from app.tracing import setup_tracing  # noqa: E402
 # Configure structured logging
 setup_structured_logging()
 logger = get_structured_logger(__name__)
+
+# Incremental reconciliation: per-user cache of "what we last successfully
+# pushed to Cerbos", so reconcile_cerbos_policies() only calls Cerbos for
+# users whose effective policy actually changed, instead of all users on
+# every policy-version bump.
+#
+# Bump _POLICY_HASH_SCHEMA whenever the hash inputs below change, so old
+# cached hashes are treated as unknown (safe -> re-push) rather than
+# compared against a differently-computed value.
+_POLICY_HASH_SCHEMA = "v2"
+_NO_POLICY_SENTINEL = "__no_policy__"
+_POLICY_HASH_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+_POLICY_HASH_TTL_JITTER_SECONDS = 24 * 3600  # +0-1 day, avoids mass-expiry
+
+
+def _role_action_fingerprint(session) -> str:
+    """
+    Fingerprint of the entire role -> action mapping table.
+
+    CerbosService.build_principal_policy() resolves each user's roles into
+    Cerbos rules by joining Role -> RoleAction -> Action fresh from the DB on
+    every push, so a user's effective policy can change even when their own
+    role list doesn't (e.g. an action gets revoked from a role they hold).
+    Note: sync_affected_users_policies()/sync_group_users_policies() in
+    CerbosService are dead code with no callers, so this reconciliation loop
+    is the ONLY path that propagates role/action mapping changes to Cerbos -
+    the per-user hash below MUST be sensitive to this table, not just to
+    each user's own role names, or privilege revocations would be silently
+    skipped forever.
+
+    Any role/action mapping change flips this fingerprint for every user in
+    the current run, forcing a full re-push - identical to today's
+    behavior for that case - while membership-only changes still invalidate
+    just the affected users, which is where the performance win comes from.
+    """
+    rows = (
+        session.query(Role.name, Action.name)
+        .join(RoleAction, RoleAction.role_id == Role.id)
+        .join(Action, Action.id == RoleAction.action_id)
+        .all()
+    )
+    role_to_actions: dict[str, list[str]] = {}
+    for role_name, action_name in rows:
+        role_to_actions.setdefault(role_name, []).append(action_name)
+    canonical = json.dumps(
+        {role: sorted(actions) for role, actions in sorted(role_to_actions.items())},
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _compute_policy_hash(fingerprint: str, user_roles: list[str]) -> str:
+    """Hash of everything that determines this user's pushed policy content."""
+    canonical = json.dumps(
+        {"fp": fingerprint, "roles": sorted(user_roles)}, separators=(",", ":")
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _policy_hash_cache_key(user_subject: str) -> str:
+    return f"policy_hash:{_POLICY_HASH_SCHEMA}:user:{user_subject}"
 
 
 class BackgroundTaskService(BaseService):
@@ -47,6 +112,7 @@ class BackgroundTaskService(BaseService):
         self.user_service = UserService()
         self.audit_service = AuditService()
         self.health_monitor = HealthMonitor()
+        self.cache_service = CacheService()
 
         # Configuration from centralized settings
         self.reconcile_interval = settings.get_reconcile_interval()
@@ -81,12 +147,15 @@ class BackgroundTaskService(BaseService):
                 try:
                     # Check if policy version has changed (much more efficient than hash-based approach)
                     from app.services.policy_version_tracker import PolicyVersionTracker
+
                     version_tracker = PolicyVersionTracker()
 
                     # Ensure settings table exists
                     version_tracker.create_settings_table_if_not_exists(session)
 
-                    has_changed = version_tracker.has_version_changed(session, self.last_known_policy_version)
+                    has_changed = version_tracker.has_version_changed(
+                        session, self.last_known_policy_version
+                    )
                     span.set_attribute("reconciliation.version_changed", has_changed)
 
                     if not has_changed:
@@ -98,11 +167,23 @@ class BackgroundTaskService(BaseService):
                         span.set_attribute("reconciliation.skipped", True)
                         return
 
+                    # Capture the version we're reconciling *against* now, before
+                    # the (potentially long-running) loop below - not after it.
+                    # A change that lands mid-run must still be detected on the
+                    # next tick; reading the version again after the loop would
+                    # silently mark that change as already synced.
+                    version_at_start = version_tracker.get_current_version(session)
+
                     logger.log_operation(
                         level=20,  # INFO
                         message="Policy version changes detected, starting full reconciliation",
                         operation="reconcile_changes_detected",
                     )
+
+                    # Fingerprint of the shared role->action mapping table,
+                    # computed once per run (see _role_action_fingerprint
+                    # docstring for why this is required for correctness).
+                    fingerprint = _role_action_fingerprint(session)
 
                     # Get all users from database
                     users = session.query(User).all()
@@ -117,14 +198,46 @@ class BackgroundTaskService(BaseService):
                             # Get user's current roles from database
                             user_roles = self.user_service.get_user_roles(session, user)
 
+                            cache_key = _policy_hash_cache_key(user.subject)
+                            desired_hash = (
+                                _compute_policy_hash(fingerprint, user_roles)
+                                if user_roles
+                                else _NO_POLICY_SENTINEL
+                            )
+
+                            try:
+                                cached_raw = self.cache_service.redis_client.get(
+                                    cache_key
+                                )
+                                cached_hash = (
+                                    cached_raw.decode("utf-8") if cached_raw else None
+                                )
+                            except Exception:
+                                # Cache unreadable - treat as unknown, never as
+                                # "unchanged". Only a confirmed hash match may
+                                # skip the Cerbos call; anything else falls
+                                # through and does the work.
+                                cached_hash = None
+
+                            if cached_hash == desired_hash:
+                                # Nothing relevant changed for this user since
+                                # the last successful sync - skip the Cerbos
+                                # call entirely.
+                                users_processed += 1
+                                continue
+
                             # Update Cerbos policy for this user
+                            push_succeeded = True
                             if user_roles:
-                                policy_pushed = self.cerbos_service.push_user_policy(
-                                    user_subject=user.subject, user_roles=user_roles
+                                policy_pushed = await asyncio.to_thread(
+                                    self.cerbos_service.push_user_policy,
+                                    user_subject=user.subject,
+                                    user_roles=user_roles,
                                 )
                                 if policy_pushed:
                                     users_updated += 1
                                 else:
+                                    push_succeeded = False
                                     users_failed += 1
                                     logger.log_operation(
                                         level=30,  # WARNING
@@ -134,8 +247,32 @@ class BackgroundTaskService(BaseService):
                                     )
                             else:
                                 # User has no roles, delete their policy if it exists
-                                self.cerbos_service.delete_user_policy(user.subject)
+                                await asyncio.to_thread(
+                                    self.cerbos_service.delete_user_policy, user.subject
+                                )
                                 users_updated += 1
+
+                            if push_succeeded:
+                                # Only remember success: if the process crashes
+                                # before this write, the next run just repeats
+                                # a redundant (idempotent) push/delete instead
+                                # of silently skipping a real one.
+                                try:
+                                    jitter = random.randint(
+                                        0, _POLICY_HASH_TTL_JITTER_SECONDS
+                                    )
+                                    await asyncio.to_thread(
+                                        self.cache_service.redis_client.set,
+                                        cache_key,
+                                        desired_hash,
+                                        _POLICY_HASH_TTL_SECONDS + jitter,
+                                    )
+                                except Exception:
+                                    # Cache write failed but the push/delete
+                                    # above already succeeded - worst case is
+                                    # one redundant re-push next cycle, which
+                                    # is safe.
+                                    pass
 
                             users_processed += 1
 
@@ -190,22 +327,13 @@ class BackgroundTaskService(BaseService):
 
                     # Update last known version if reconciliation was successful (no failures)
                     if users_failed == 0:
-                        try:
-                            current_version = version_tracker.get_current_version(session)
-                            self.last_known_policy_version = current_version
-                            span.set_attribute("reconciliation.version_updated", True)
-                            logger.log_operation(
-                                level=20,  # INFO
-                                message=f"Policy version marked as synced: {current_version[:8]}",
-                                operation="reconcile_version_synced",
-                            )
-                        except Exception as version_error:
-                            logger.log_operation(
-                                level=30,  # WARNING
-                                message="Error updating synced policy version",
-                                operation="reconcile_version_error",
-                                extra_fields={"error": str(version_error)},
-                            )
+                        self.last_known_policy_version = version_at_start
+                        span.set_attribute("reconciliation.version_updated", True)
+                        logger.log_operation(
+                            level=20,  # INFO
+                            message=f"Policy version marked as synced: {version_at_start[:8]}",
+                            operation="reconcile_version_synced",
+                        )
                     else:
                         logger.log_operation(
                             level=30,  # WARNING
@@ -253,8 +381,8 @@ class BackgroundTaskService(BaseService):
                         .filter(
                             FailedOperation.status.in_(["pending", "retrying"]),
                             FailedOperation.retry_count < FailedOperation.max_retries,
-                            (FailedOperation.next_retry_at.is_(None)) |
-                            (FailedOperation.next_retry_at <= now)
+                            (FailedOperation.next_retry_at.is_(None))
+                            | (FailedOperation.next_retry_at <= now),
                         )
                         .order_by(FailedOperation.failed_at)
                         .limit(50)  # Process max 50 operations per run
@@ -316,9 +444,11 @@ class BackgroundTaskService(BaseService):
                                     # Schedule next retry with exponential backoff
                                     backoff_seconds = min(
                                         300,  # Max 5 minutes
-                                        30 * (2 ** (failed_op.retry_count - 1))
+                                        30 * (2 ** (failed_op.retry_count - 1)),
                                     )
-                                    failed_op.next_retry_at = now + timedelta(seconds=backoff_seconds)
+                                    failed_op.next_retry_at = now + timedelta(
+                                        seconds=backoff_seconds
+                                    )
                                     failed_op.status = "pending"
                                     logger.log_operation(
                                         level=30,  # WARNING
@@ -349,9 +479,16 @@ class BackgroundTaskService(BaseService):
                             )
                             span.record_exception(retry_error)
 
-                    span.set_attribute("sync_retry.operations_retried", operations_retried)
-                    span.set_attribute("sync_retry.operations_succeeded", operations_succeeded)
-                    span.set_attribute("sync_retry.operations_permanently_failed", operations_permanently_failed)
+                    span.set_attribute(
+                        "sync_retry.operations_retried", operations_retried
+                    )
+                    span.set_attribute(
+                        "sync_retry.operations_succeeded", operations_succeeded
+                    )
+                    span.set_attribute(
+                        "sync_retry.operations_permanently_failed",
+                        operations_permanently_failed,
+                    )
 
                     # Audit the sync retry operation
                     self.audit_service.safe_log_operation(
@@ -589,7 +726,7 @@ class BackgroundTaskService(BaseService):
                     extra_fields={"error": str(e)},
                 )
 
-            if hasattr(self, 'scheduler') and self.scheduler:
+            if hasattr(self, "scheduler") and self.scheduler:
                 self.scheduler.shutdown(wait=False)
 
             logger.log_operation(
@@ -617,15 +754,17 @@ class BackgroundTaskService(BaseService):
         try:
             if operation_type == "cerbos_policy_push":
                 # Retry pushing user policy to Cerbos
-                return self.cerbos_service.push_user_policy(
+                return await asyncio.to_thread(
+                    self.cerbos_service.push_user_policy,
                     user_subject=operation_data["user_subject"],
-                    user_roles=operation_data["user_roles"]
+                    user_roles=operation_data["user_roles"],
                 )
 
             elif operation_type == "cerbos_policy_delete":
                 # Retry deleting user policy from Cerbos
-                return self.cerbos_service.delete_user_policy(
-                    user_subject=operation_data["user_subject"]
+                return await asyncio.to_thread(
+                    self.cerbos_service.delete_user_policy,
+                    user_subject=operation_data["user_subject"],
                 )
 
             elif operation_type == "user_policy_sync":
@@ -635,12 +774,15 @@ class BackgroundTaskService(BaseService):
                 if user:
                     user_roles = self.user_service.get_user_roles(session, user)
                     if user_roles:
-                        return self.cerbos_service.push_user_policy(
+                        return await asyncio.to_thread(
+                            self.cerbos_service.push_user_policy,
                             user_subject=user.subject,
-                            user_roles=user_roles
+                            user_roles=user_roles,
                         )
                     else:
-                        return self.cerbos_service.delete_user_policy(user.subject)
+                        return await asyncio.to_thread(
+                            self.cerbos_service.delete_user_policy, user.subject
+                        )
                 return False
 
             else:
