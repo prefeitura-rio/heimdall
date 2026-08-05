@@ -23,7 +23,13 @@ class HealthMonitor(BaseService):
 
         # Health check configuration
         self.check_interval = 30  # seconds
-        self.cache_ttl = 60  # seconds - cache expires if not updated
+        # 120s (not 60s): worst-case _check_cerbos_health() latency is ~27s
+        # (5s request timeout x up to 4 attempts + 1+2+4s exponential backoff
+        # sleeps inside CerbosService._retry_with_backoff), so a 60s TTL left
+        # almost no margin against the 30s check_interval (57s worst-case
+        # cycle vs 60s TTL). Widened so a transient slow check can't let the
+        # cache go stale and fail every Cerbos-gated endpoint closed.
+        self.cache_ttl = 120  # seconds - cache expires if not updated
 
     def start_monitoring(self):
         """Start background health monitoring tasks."""
@@ -39,7 +45,9 @@ class HealthMonitor(BaseService):
 
     async def _monitor_services(self):
         """Background task to continuously monitor service health."""
-        with self.trace_operation("monitor_services", {"monitor.operation": "background_monitoring"}) as span:
+        with self.trace_operation(
+            "monitor_services", {"monitor.operation": "background_monitoring"}
+        ) as span:
             span.set_attribute("monitor.check_interval", self.check_interval)
             span.set_attribute("monitor.cache_ttl", self.cache_ttl)
 
@@ -62,23 +70,26 @@ class HealthMonitor(BaseService):
 
     async def _check_cerbos_health(self):
         """Check Cerbos health and update cache."""
-        with self.trace_operation("check_cerbos_health", {"monitor.service": "cerbos"}) as span:
+        with self.trace_operation(
+            "check_cerbos_health", {"monitor.service": "cerbos"}
+        ) as span:
             try:
-                # Use the synchronous health check method
-                is_healthy = self.cerbos_service.health_check()
+                # Run the synchronous (requests-based) health check off the
+                # event loop so a slow/hanging Cerbos can't block this
+                # process's other asyncio tasks (e.g. the reconciliation
+                # scheduler and its own periodic health refresh).
+                is_healthy = await asyncio.to_thread(self.cerbos_service.health_check)
 
                 health_data = {
                     "healthy": is_healthy,
                     "last_check": time.time(),
-                    "service": "cerbos"
+                    "service": "cerbos",
                 }
 
                 # Cache the health status
                 cache_key = "service_health:cerbos"
                 self.cache_service.redis_client.setex(
-                    cache_key,
-                    self.cache_ttl,
-                    str(health_data)
+                    cache_key, self.cache_ttl, str(health_data)
                 )
 
                 span.set_attribute("monitor.cerbos_healthy", is_healthy)
@@ -94,14 +105,12 @@ class HealthMonitor(BaseService):
                     "healthy": False,
                     "last_check": time.time(),
                     "service": "cerbos",
-                    "error": str(e)
+                    "error": str(e),
                 }
 
                 cache_key = "service_health:cerbos"
                 self.cache_service.redis_client.setex(
-                    cache_key,
-                    self.cache_ttl,
-                    str(health_data)
+                    cache_key, self.cache_ttl, str(health_data)
                 )
 
     def is_cerbos_available(self) -> bool:
@@ -109,7 +118,9 @@ class HealthMonitor(BaseService):
         Fast check if Cerbos is available based on cached health status.
         Returns False if cache has expired (indicating monitoring task issues).
         """
-        with self.trace_operation("is_cerbos_available", {"monitor.operation": "availability_check"}) as span:
+        with self.trace_operation(
+            "is_cerbos_available", {"monitor.operation": "availability_check"}
+        ) as span:
             try:
                 cache_key = "service_health:cerbos"
                 cached_health = self.cache_service.redis_client.get(cache_key)
@@ -121,7 +132,7 @@ class HealthMonitor(BaseService):
                     return False
 
                 # Parse cached health data (simplified - in production use JSON)
-                health_str = cached_health.decode('utf-8')
+                health_str = cached_health.decode("utf-8")
                 is_healthy = "'healthy': True" in health_str
 
                 span.set_attribute("monitor.cache_hit", True)
@@ -139,7 +150,9 @@ class HealthMonitor(BaseService):
 
     def get_service_health_summary(self) -> dict[str, any]:
         """Get health summary of all monitored services."""
-        with self.trace_operation("get_service_health_summary", {"monitor.operation": "health_summary"}) as span:
+        with self.trace_operation(
+            "get_service_health_summary", {"monitor.operation": "health_summary"}
+        ) as span:
             try:
                 cache_key = "service_health:cerbos"
                 cached_health = self.cache_service.redis_client.get(cache_key)
@@ -149,18 +162,18 @@ class HealthMonitor(BaseService):
                         "cerbos": {
                             "available": False,
                             "status": "cache_expired",
-                            "last_check": None
+                            "last_check": None,
                         }
                     }
                 else:
-                    health_str = cached_health.decode('utf-8')
+                    health_str = cached_health.decode("utf-8")
                     is_healthy = "'healthy': True" in health_str
 
                     health_data = {
                         "cerbos": {
                             "available": is_healthy,
                             "status": "healthy" if is_healthy else "unhealthy",
-                            "cached_data": health_str
+                            "cached_data": health_str,
                         }
                     }
 
@@ -171,9 +184,5 @@ class HealthMonitor(BaseService):
                 span.record_exception(e)
                 span.set_attribute("monitor.error", str(e))
                 return {
-                    "cerbos": {
-                        "available": False,
-                        "status": "error",
-                        "error": str(e)
-                    }
+                    "cerbos": {"available": False, "status": "error", "error": str(e)}
                 }
