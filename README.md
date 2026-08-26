@@ -1,4 +1,4 @@
-# Identidade Carioca Mapping Service
+# Heimdall Admin Service
 
 A comprehensive admin service for group and role management with Cerbos authorization integration. Built with FastAPI, PostgreSQL, Redis, and OpenTelemetry tracing.
 
