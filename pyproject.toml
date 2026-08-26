@@ -1,7 +1,7 @@
 [project]
-name = "heimdall"
+name = "identidade-carioca-mapping"
 version = "0.1.0"
-description = "Heimdall Admin Service - FastAPI service for managing groups, memberships, and mappings"
+description = "Identidade Carioca endpoint-to-action mapping service"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.104.0",

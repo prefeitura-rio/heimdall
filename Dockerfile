@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for Heimdall Admin Service
+# Multi-stage Dockerfile for Identidade Carioca Mapping Service
 # Based on SPEC.md Section 5 Docker Architecture
 
 # Stage 1: Base image with dependencies

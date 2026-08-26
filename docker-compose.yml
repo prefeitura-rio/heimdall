@@ -1,4 +1,4 @@
-# Docker Compose for Heimdall Admin Service Local Development
+# Docker Compose for Identidade Carioca Mapping Service Local Development
 # Focuses on essential services needed for development
 
 services:
