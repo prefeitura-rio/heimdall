@@ -1,7 +1,4 @@
-"""
-FastAPI application entry point for Heimdall Admin Service.
-Implements OpenTelemetry tracing setup as specified in SPEC.md Section 6.
-"""
+"""FastAPI entry point for the Identidade Carioca mapping service."""
 
 import os
 import time
@@ -203,31 +200,25 @@ async def lifespan(_app: FastAPI):
 
 # Create FastAPI application
 app = FastAPI(
-    title="Heimdall Admin Service",
+    title="Identidade Carioca Mapping Service",
     lifespan=lifespan,
     description="""
-# Heimdall Admin Service API
+# Identidade Carioca Mapping Service
 
 A comprehensive admin service for user and group management with authorization powered by Cerbos.
 
 ## Features
 
-- **User Management**: Automatic user creation from JWT tokens with role-based access control
-- **Group Management**: Create, manage, and assign users to groups with hierarchical permissions
-- **Role Management**: Define and assign roles to users and groups
-- **Mapping Management**: Configure API endpoint to action mappings for authorization
-- **Action Management**: Define available actions for fine-grained permission control
-- **Cerbos Integration**: Policy-based authorization with external Cerbos service
-- **Audit Logging**: Comprehensive audit trail for all administrative operations
-- **Redis Caching**: High-performance caching for frequently accessed data
+- **Mapping Resolution**: Resolve API endpoint and method pairs to authorization actions
+- **Redis Caching**: High-performance mapping lookup for authorization middleware
     """.strip(),
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     contact={
-        "name": "Heimdall Admin Service",
-        "url": "https://github.com/your-org/heimdall",
-        "email": "admin@yourorg.com"
+        "name": "Identidade Carioca",
+        "url": "https://github.com/prefeitura-rio/identidade-carioca-mapping",
+        "email": "infra@prefeitura.rio"
     },
     license_info={
         "name": "MIT",
@@ -486,3 +477,4 @@ app.include_router(memberships.router, prefix="/api/v1", tags=["memberships"])
 app.include_router(roles.router, prefix="/api/v1/roles", tags=["roles"])
 app.include_router(actions.router, prefix="/api/v1/actions", tags=["actions"])
 app.include_router(mappings.router, prefix="/api/v1/mappings", tags=["mappings"])
+app.include_router(mappings.resolve_router, prefix="/api/v1", tags=["mappings"])

@@ -3,7 +3,7 @@ Mapping management API endpoints.
 Implements mapping endpoints as specified in SPEC.md Section 3.5.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from app.services.mapping import MappingService
 from app.services.user import UserService
 
 router = APIRouter()
+resolve_router = APIRouter()
 
 
 # Pydantic models for request/response
@@ -137,6 +138,38 @@ class MappingResponse(BaseModel):
                 "description": "Get user profile information"
             }
         }
+
+
+class ResolveRequest(BaseModel):
+    """Request model for the service-to-service resolve contract."""
+
+    path: str = Field(..., min_length=1, max_length=2048)
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
+
+@resolve_router.post(
+    "/resolve",
+    response_model=MappingResponse,
+    summary="Resolve an endpoint to an action",
+)
+async def resolve_endpoint(
+    request: ResolveRequest,
+    _current_user: Annotated[dict, Depends(get_api_user)],
+    db: Annotated[Session, Depends(get_db)],
+    mapping_service: Annotated[MappingService, Depends(lambda: MappingService())],
+) -> MappingResponse:
+    """Resolve one endpoint/method pair for authorization middleware."""
+    mapping = mapping_service.resolve_mapping(
+        db=db,
+        path=request.path,
+        method=request.method,
+    )
+    if not mapping:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No mapping found for path '{request.path}' and method '{request.method}'",
+        )
+    return MappingResponse(**mapping)
 
 
 class MappingDetailResponse(BaseModel):
