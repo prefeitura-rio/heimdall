@@ -112,6 +112,9 @@ spec:
         - name: heimdall-background
           image: ghcr.io/prefeitura-rio/heimdall:stable
           command: ["uv", "run", "python", "-m", "app.background_tasks"]
+          env:
+            - name: JWT_ISSUER
+              value: "https://auth-idrio.apps.rio.gov.br/auth/realms/idrio_cidadao"
           envFrom:
             - secretRef:
                 name: heimdall-admin-secrets
