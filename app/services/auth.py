@@ -22,6 +22,7 @@ class AuthService(BaseService):
         self.jwks_url = settings.get_keycloak_jwks_url()
         self.jwt_algorithm = settings.JWT_ALGORITHM
         self.jwt_audience = settings.JWT_AUDIENCE
+        self.jwt_issuer = settings.get_jwt_issuer()
         self.static_api_token = settings.STATIC_API_TOKEN
         self.cache_service = CacheService()
 
@@ -108,10 +109,18 @@ class AuthService(BaseService):
                 # Verify signature and expiration against the JWKS signing key.
                 # The `aud` claim is intentionally not validated (Keycloak tokens
                 # may not carry the configured audience).
+                if not self.jwt_issuer:
+                    span.set_attribute("auth.error", "jwt_issuer_not_configured")
+                    return None
                 signing_key = self._get_signing_key(token)
                 decode_kwargs: dict[str, Any] = {
                     "algorithms": ["RS256"],
-                    "options": {"verify_aud": False},
+                    "issuer": self.jwt_issuer,
+                    "options": {
+                        "verify_aud": False,
+                        "verify_iss": True,
+                        "require_iss": True,
+                    },
                 }
                 payload = jwt.decode(token, signing_key, **decode_kwargs)
 
