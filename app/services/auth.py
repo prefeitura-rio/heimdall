@@ -105,15 +105,14 @@ class AuthService(BaseService):
             },
         ) as span:
             try:
-                # Verify signature and expiration against the JWKS signing key
+                # Verify signature and expiration against the JWKS signing key.
+                # The `aud` claim is intentionally not validated (Keycloak tokens
+                # may not carry the configured audience).
                 signing_key = self._get_signing_key(token)
                 decode_kwargs: dict[str, Any] = {
                     "algorithms": ["RS256"],
                     "options": {"verify_aud": False},
                 }
-                if self.jwt_audience:
-                    decode_kwargs["audience"] = self.jwt_audience
-                    decode_kwargs["options"] = {"verify_aud": True, "require_aud": True}
                 payload = jwt.decode(token, signing_key, **decode_kwargs)
 
                 # Extract user information - use preferred_username (CPF) as subject

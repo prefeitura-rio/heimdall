@@ -36,7 +36,7 @@ PRIVATE_PEM, PUBLIC_JWK = _make_key()
 OTHER_PEM, _ = _make_key()
 
 
-def _token(exp_delta=3600, pem=PRIVATE_PEM, kid=KID):
+def _token(exp_delta=3600, pem=PRIVATE_PEM, kid=KID, aud=None):
     now = int(time.time())
     claims = {
         "sub": "uuid-1",
@@ -45,6 +45,8 @@ def _token(exp_delta=3600, pem=PRIVATE_PEM, kid=KID):
         "iat": now,
         "exp": now + exp_delta,
     }
+    if aud is not None:
+        claims["aud"] = aud
     headers = {"kid": kid} if kid else {}
     return jwt.encode(claims, pem, algorithm="RS256", headers=headers)
 
@@ -91,9 +93,12 @@ def test_unsigned_claims_rejected(service):
     assert service.verify_jwt_token("e30.e30.") is None
 
 
-def test_audience_enforced_when_configured(service):
+def test_audience_not_enforced_when_configured(service):
     service.jwt_audience = "heimdall"
-    assert service.verify_jwt_token(_token()) is None
+    assert service.verify_jwt_token(_token()) is not None
+    assert service.verify_jwt_token(_token(aud="account")) is not None
+    assert service.verify_jwt_token(_token(aud="heimdall")) is not None
+    assert service.verify_jwt_token(_token(exp_delta=-60, aud="heimdall")) is None
 
 
 def _creds(token):
