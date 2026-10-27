@@ -43,6 +43,7 @@ class Settings:
         # JWT Configuration
         self.JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "RS256")
         self.JWT_AUDIENCE: str | None = os.getenv("JWT_AUDIENCE")
+        self.JWT_ISSUER: str | None = os.getenv("JWT_ISSUER")
 
         # Static API Token
         self.STATIC_API_TOKEN: str | None = os.getenv("STATIC_API_TOKEN")
@@ -116,6 +117,15 @@ class Settings:
         """Get the Keycloak JWKS URL."""
         return self.KEYCLOAK_JWKS_URL
 
+    def get_jwt_issuer(self) -> str | None:
+        """Get the expected JWT issuer (explicit, or derived from the JWKS URL)."""
+        if self.JWT_ISSUER:
+            return self.JWT_ISSUER
+        suffix = "/protocol/openid-connect/certs"
+        if self.KEYCLOAK_JWKS_URL and self.KEYCLOAK_JWKS_URL.endswith(suffix):
+            return self.KEYCLOAK_JWKS_URL.removesuffix(suffix)
+        return None
+
     def is_debug_mode(self) -> bool:
         """Check if SQL debug mode is enabled."""
         return self.SQL_DEBUG
@@ -178,6 +188,7 @@ class Settings:
             ("KEYCLOAK_JWKS_URL", "Keycloak JWKS endpoint URL"),
             ("JWT_ALGORITHM", "JWT signature algorithm"),
             ("JWT_AUDIENCE", "JWT audience claim"),
+            ("JWT_ISSUER", "JWT issuer claim"),
             ("KEYCLOAK_CLIENT_ID", "Keycloak client ID for role extraction"),
             ("STATIC_API_TOKEN", "Static API token for adapter authentication"),
         ]
@@ -227,6 +238,8 @@ class Settings:
                 value = self.JWT_ALGORITHM
             elif var_name == "JWT_AUDIENCE":
                 value = self.JWT_AUDIENCE
+            elif var_name == "JWT_ISSUER":
+                value = self.get_jwt_issuer()
             elif var_name == "KEYCLOAK_CLIENT_ID":
                 value = self.KEYCLOAK_CLIENT_ID
             elif var_name == "STATIC_API_TOKEN":
@@ -248,6 +261,7 @@ class Settings:
         url_variables = [
             ("CERBOS_BASE_URL", self.CERBOS_BASE_URL),
             ("KEYCLOAK_JWKS_URL", self.KEYCLOAK_JWKS_URL),
+            ("JWT_ISSUER", self.JWT_ISSUER),
             ("OTEL_EXPORTER_OTLP_ENDPOINT", self.OTEL_EXPORTER_OTLP_ENDPOINT),
             ("REDIS_URL", self.REDIS_URL),
         ]
@@ -266,7 +280,7 @@ class Settings:
                         )
 
                     # Specific validations
-                    if var_name == "KEYCLOAK_JWKS_URL" and parsed.scheme not in [
+                    if var_name in ("KEYCLOAK_JWKS_URL", "JWT_ISSUER") and parsed.scheme not in [
                         "http",
                         "https",
                     ]:
@@ -489,6 +503,8 @@ class Settings:
                 value = self.JWT_ALGORITHM
             elif var_name == "JWT_AUDIENCE":
                 value = self.JWT_AUDIENCE
+            elif var_name == "JWT_ISSUER":
+                value = self.get_jwt_issuer()
             elif var_name == "KEYCLOAK_CLIENT_ID":
                 value = self.KEYCLOAK_CLIENT_ID
             elif var_name == "STATIC_API_TOKEN":

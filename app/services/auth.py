@@ -22,6 +22,7 @@ class AuthService(BaseService):
         self.jwks_url = settings.get_keycloak_jwks_url()
         self.jwt_algorithm = settings.JWT_ALGORITHM
         self.jwt_audience = settings.JWT_AUDIENCE
+        self.jwt_issuer = settings.get_jwt_issuer()
         self.static_api_token = settings.STATIC_API_TOKEN
         self.cache_service = CacheService()
 
@@ -91,7 +92,11 @@ class AuthService(BaseService):
             raise ValueError(f"Failed to get signing key: {e}")
 
     def verify_jwt_token(self, token: str) -> dict[str, Any] | None:
-        """Extract JWT token claims without verification (validation handled upstream)."""
+        """Verify JWT signature (via JWKS) and expiration, returning user claims.
+
+        Returns None on any verification failure (invalid signature, expired token,
+        missing/unknown kid, malformed token); callers translate that into HTTP 401.
+        """
         with self.trace_operation(
             "verify_jwt_token",
             {
@@ -101,8 +106,23 @@ class AuthService(BaseService):
             },
         ) as span:
             try:
-                # Decode JWT without verification (validated upstream at gateway/ingress)
-                payload = jwt.get_unverified_claims(token)
+                # Verify signature and expiration against the JWKS signing key.
+                # The `aud` claim is intentionally not validated (Keycloak tokens
+                # may not carry the configured audience).
+                if not self.jwt_issuer:
+                    span.set_attribute("auth.error", "jwt_issuer_not_configured")
+                    return None
+                signing_key = self._get_signing_key(token)
+                decode_kwargs: dict[str, Any] = {
+                    "algorithms": ["RS256"],
+                    "issuer": self.jwt_issuer,
+                    "options": {
+                        "verify_aud": False,
+                        "verify_iss": True,
+                        "require_iss": True,
+                    },
+                }
+                payload = jwt.decode(token, signing_key, **decode_kwargs)
 
                 # Extract user information - use preferred_username (CPF) as subject
                 user_info = {
@@ -126,7 +146,7 @@ class AuthService(BaseService):
 
                 span.set_attribute("auth.token_valid", True)
                 span.set_attribute("auth.user_subject", user_info["subject"])
-                span.set_attribute("auth.verification_skipped", True)
+                span.set_attribute("auth.verification_skipped", False)
 
                 return user_info
 
