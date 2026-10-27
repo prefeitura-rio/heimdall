@@ -91,7 +91,11 @@ class AuthService(BaseService):
             raise ValueError(f"Failed to get signing key: {e}")
 
     def verify_jwt_token(self, token: str) -> dict[str, Any] | None:
-        """Extract JWT token claims without verification (validation handled upstream)."""
+        """Verify JWT signature (via JWKS) and expiration, returning user claims.
+
+        Returns None on any verification failure (invalid signature, expired token,
+        missing/unknown kid, malformed token); callers translate that into HTTP 401.
+        """
         with self.trace_operation(
             "verify_jwt_token",
             {
@@ -101,8 +105,16 @@ class AuthService(BaseService):
             },
         ) as span:
             try:
-                # Decode JWT without verification (validated upstream at gateway/ingress)
-                payload = jwt.get_unverified_claims(token)
+                # Verify signature and expiration against the JWKS signing key
+                signing_key = self._get_signing_key(token)
+                decode_kwargs: dict[str, Any] = {
+                    "algorithms": ["RS256"],
+                    "options": {"verify_aud": False},
+                }
+                if self.jwt_audience:
+                    decode_kwargs["audience"] = self.jwt_audience
+                    decode_kwargs["options"] = {"verify_aud": True, "require_aud": True}
+                payload = jwt.decode(token, signing_key, **decode_kwargs)
 
                 # Extract user information - use preferred_username (CPF) as subject
                 user_info = {
@@ -126,7 +138,7 @@ class AuthService(BaseService):
 
                 span.set_attribute("auth.token_valid", True)
                 span.set_attribute("auth.user_subject", user_info["subject"])
-                span.set_attribute("auth.verification_skipped", True)
+                span.set_attribute("auth.verification_skipped", False)
 
                 return user_info
 
