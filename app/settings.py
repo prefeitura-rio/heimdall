@@ -239,7 +239,7 @@ class Settings:
             elif var_name == "JWT_AUDIENCE":
                 value = self.JWT_AUDIENCE
             elif var_name == "JWT_ISSUER":
-                value = self.JWT_ISSUER
+                value = self.get_jwt_issuer()
             elif var_name == "KEYCLOAK_CLIENT_ID":
                 value = self.KEYCLOAK_CLIENT_ID
             elif var_name == "STATIC_API_TOKEN":
@@ -504,7 +504,7 @@ class Settings:
             elif var_name == "JWT_AUDIENCE":
                 value = self.JWT_AUDIENCE
             elif var_name == "JWT_ISSUER":
-                value = self.JWT_ISSUER
+                value = self.get_jwt_issuer()
             elif var_name == "KEYCLOAK_CLIENT_ID":
                 value = self.KEYCLOAK_CLIENT_ID
             elif var_name == "STATIC_API_TOKEN":
