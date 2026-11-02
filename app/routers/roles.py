@@ -184,20 +184,27 @@ async def create_role(
     db: Annotated[Session, Depends(get_db)],
     role_service: Annotated[RoleService, Depends(lambda: RoleService())],
     user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
 ):
     """
-    Create a role (admin-only).
+    Create a role.
     Implements POST /roles as specified in SPEC.md Section 3.4.
+    Authorization is decided by Cerbos (action `role:create` on resource `role`).
     """
-    # Get caller's roles for admin permission check
+    # Get caller's roles for Cerbos permission check
     caller_roles = user_service.get_user_roles(db, current_user)
 
-    # Check if user has admin privileges (simplified check)
-    has_admin = any(role in ["admin", "superadmin"] for role in caller_roles)
-    if not has_admin:
+    # Check permission to create this role using Cerbos
+    can_create = cerbos_service.can_create_role(
+        caller_subject=current_user.subject,
+        caller_roles=caller_roles,
+        role_name=role_data.name,
+    )
+
+    if not can_create:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required to create roles",
+            detail=f"Permission denied to create role '{role_data.name}'",
         )
 
     # Create the role
