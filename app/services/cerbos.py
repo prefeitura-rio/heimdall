@@ -279,6 +279,18 @@ class CerbosService(BaseService):
             resource_attrs={"name": group_name},
         )
 
+    def can_create_role(
+        self, caller_subject: str, caller_roles: list[str], role_name: str
+    ) -> bool:
+        """Check if caller can create a role."""
+        return self.check_permission(
+            caller_subject=caller_subject,
+            caller_roles=caller_roles,
+            action="role:create",
+            resource_type="role",
+            resource_attrs={"name": role_name},
+        )
+
     def can_create_mapping(
         self, caller_subject: str, caller_roles: list[str], action_name: str
     ) -> bool:
