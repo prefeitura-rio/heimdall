@@ -105,7 +105,7 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - `users` table model
   - `memberships` table model
   - `user_roles` table model
-  - `group_management_rights` table model
+  - `group_management_rights` table model (reserved and unused: pattern-based delegation of group management is not supported, see SPEC.md)
   - `admin_audit` table model
 - [x] Ensure all foreign key relationships are correctly defined
 - [x] Add proper indexes as mentioned in SPEC.md Section 2 Notes
