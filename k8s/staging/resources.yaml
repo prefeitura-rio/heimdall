@@ -51,6 +51,8 @@ spec:
               value: "https://auth-idriohom.apps.rio.gov.br/auth/realms/idrio_cidadao"
             - name: ENABLE_BACKGROUND_TASKS
               value: "false"
+            - name: CORS_ALLOWED_ORIGINS
+              value: "https://staging.app.dados.rio,https://admin.staging.app.dados.rio,http://localhost:3000"
           envFrom:
             - secretRef:
                 name: heimdall-admin-secrets

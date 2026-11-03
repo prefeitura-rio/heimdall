@@ -19,6 +19,23 @@ class ConfigValidationError(Exception):
     pass
 
 
+def parse_cors_allowed_origins(raw: str | None) -> list[str]:
+    """
+    Parse a comma-separated CORS origin allowlist.
+
+    Entries are trimmed and lose any trailing slash; empty entries and the
+    wildcard "*" are ignored on purpose, so the allowlist can never open the
+    API to every origin. An unset or empty value allows no cross-origin caller.
+    """
+    origins: list[str] = []
+    for entry in (raw or "").split(","):
+        origin = entry.strip().rstrip("/")
+        if not origin or origin == "*" or origin in origins:
+            continue
+        origins.append(origin)
+    return origins
+
+
 class Settings:
     """Centralized configuration settings with validation."""
 
@@ -67,6 +84,11 @@ class Settings:
         # Server Configuration
         self.HOST: str = os.getenv("HOST", "0.0.0.0")
         self.PORT: int = int(os.getenv("PORT", "8080"))
+
+        # CORS: comma-separated allowlist of browser origins (empty = none)
+        self.CORS_ALLOWED_ORIGINS: list[str] = parse_cors_allowed_origins(
+            os.getenv("CORS_ALLOWED_ORIGINS")
+        )
 
         # OpenTelemetry Tracing
         self.OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "heimdall-admin-service")
@@ -217,6 +239,11 @@ class Settings:
             ("SYNC_RETRY_INTERVAL_SECONDS", "Sync retry interval", "60"),
             ("HOST", "Server host address", "0.0.0.0"),
             ("PORT", "Server port", "8080"),
+            (
+                "CORS_ALLOWED_ORIGINS",
+                "Comma-separated allowlist of CORS origins (wildcard ignored)",
+                "",
+            ),
         ]
 
     def _validate_required_variables(self) -> list[str]:
@@ -547,6 +574,7 @@ class Settings:
             "SYNC_RETRY_INTERVAL_SECONDS": self.SYNC_RETRY_INTERVAL_SECONDS,
             "HOST": self.HOST,
             "PORT": self.PORT,
+            "CORS_ALLOWED_ORIGINS": ",".join(self.CORS_ALLOWED_ORIGINS),
         }
 
         for var_name, _, default in self._get_optional_variables():

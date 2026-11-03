@@ -38,7 +38,7 @@ from app.routers import (  # noqa: E402
 from app.services.cerbos import CerbosService  # noqa: E402
 from app.services.database_monitor import setup_database_monitoring  # noqa: E402
 from app.services.health_monitor import HealthMonitor  # noqa: E402
-from app.settings import validate_environment  # noqa: E402
+from app.settings import settings, validate_environment  # noqa: E402
 from app.tracing import (  # noqa: E402
     instrument_fastapi,
     instrument_sqlalchemy,
@@ -235,10 +235,10 @@ A comprehensive admin service for user and group management with authorization p
     },
 )
 
-# Add CORS middleware if needed
+# CORS: only the origins allowlisted in CORS_ALLOWED_ORIGINS (none by default)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure as needed for production
+    allow_origins=settings.CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
