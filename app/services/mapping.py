@@ -17,6 +17,13 @@ from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
 from app.services.redis_mapping import RedisMappingService
 
+# A path segment that starts with ":name" (optionally right after a leading "^").
+_NAMED_PARAM_SEGMENT = re.compile(r"(?:^\^?|/):[A-Za-z_]")
+_NAMED_PARAM_ERROR = (
+    "Invalid path pattern: ':name' path parameters are not supported; "
+    "use a regex group such as '([^/]+)' instead"
+)
+
 
 class MappingService(BaseService):
     """Service for mapping management operations."""
@@ -150,6 +157,10 @@ class MappingService(BaseService):
             },
         ) as span:
             try:
+                if self._has_named_param_segment(path_pattern):
+                    span.set_attribute("mapping.invalid_pattern", True)
+                    raise ValueError(_NAMED_PARAM_ERROR)
+
                 # Validate the regex pattern
                 try:
                     pattern = self._convert_pattern_to_regex(path_pattern)
@@ -308,6 +319,10 @@ class MappingService(BaseService):
                 updated = False
 
                 if path_pattern is not None:
+                    if self._has_named_param_segment(path_pattern):
+                        span.set_attribute("mapping.invalid_pattern", True)
+                        raise ValueError(_NAMED_PARAM_ERROR)
+
                     # Validate the regex pattern
                     try:
                         pattern = self._convert_pattern_to_regex(path_pattern)
@@ -527,14 +542,27 @@ class MappingService(BaseService):
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 raise
 
+    def _has_named_param_segment(self, path_pattern: str) -> bool:
+        """
+        Whether the pattern has a ":name" segment (e.g. "/users/:id").
+
+        ":param" is not supported (DEV-186): neither the Redis fast path (raw
+        pattern) nor the database fallback turns it into a parameter, so such a
+        mapping would only match the literal text ":id". Creation and update
+        refuse it. A colon inside a segment ("/files/x:copy") is a literal
+        character and stays allowed.
+        """
+        return _NAMED_PARAM_SEGMENT.search(path_pattern) is not None
+
     def _convert_pattern_to_regex(self, path_pattern: str) -> str:
         """
         Convert a simple path pattern to a full regex pattern.
         Supports:
         - * for any characters within a path segment
         - ** for any path segments
-        - :param for named parameters
         - Raw regex patterns with parentheses for capture groups
+        Named ":param" segments are not supported (DEV-186): creation and
+        update refuse them (see _has_named_param_segment).
         """
         # Check if this looks like a raw regex pattern (contains unescaped parentheses)
         if '(' in path_pattern and ')' in path_pattern:
@@ -556,11 +584,8 @@ class MappingService(BaseService):
         if body.endswith("$") and not body.endswith("\\$"):
             body = body[:-1]
 
-        # Escape special regex characters except *, ?, and :
+        # Escape special regex characters
         pattern = re.escape(body)
-
-        # Handle path parameters like :id -> [^/]+
-        pattern = re.sub(r"\\:([a-zA-Z_][a-zA-Z0-9_]*)", r"(?P<\1>[^/]+)", pattern)
 
         # Handle ** for multiple path segments
         pattern = pattern.replace(r"\*\*", ".*")
