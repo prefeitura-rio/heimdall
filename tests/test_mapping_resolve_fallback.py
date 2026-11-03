@@ -157,3 +157,52 @@ def test_escaped_literal_dollar_is_not_taken_as_anchor():
     assert re.match(regex, "/price\\$")
     assert not re.match(regex, "/price")
     assert not re.match(regex, "/price\\$extra")
+
+
+# DEV-186: ":param" segments are not supported. They used to be accepted and
+# then matched only the literal text ":id", so creation and update refuse them.
+NAMED_PARAM_PATTERNS = ["/users/:id", ":id", "^/users/:user_id/posts$", "/a/:_x/b"]
+
+
+@pytest.mark.parametrize("path_pattern", NAMED_PARAM_PATTERNS)
+def test_create_mapping_rejects_named_param_segment(service, db, creator, path_pattern):
+    with pytest.raises(ValueError, match="Invalid path pattern"):
+        _create(service, db, creator, path_pattern)
+
+    assert db.query(Endpoint).count() == 0
+    service.redis_mapping_service.store_mapping.assert_not_called()
+
+
+@pytest.mark.parametrize("path_pattern", NAMED_PARAM_PATTERNS)
+def test_update_mapping_rejects_named_param_segment(service, db, creator, path_pattern):
+    endpoint = _create(service, db, creator, OPENAPI_NO_PARAM)
+    user, _ = creator
+
+    with pytest.raises(ValueError, match="Invalid path pattern"):
+        service.update_mapping(
+            db=db,
+            mapping_id=endpoint.id,
+            path_pattern=path_pattern,
+            method=None,
+            action_id=None,
+            description=None,
+            updated_by=user,
+        )
+
+    db.refresh(endpoint)
+    assert endpoint.path_pattern == OPENAPI_NO_PARAM
+
+
+@pytest.mark.parametrize(
+    "path_pattern", ["/files/x:copy", "/v1/items/([^/]+):batchGet$", "/a/(?:b|c)$"]
+)
+def test_colon_inside_a_segment_is_still_accepted(service, db, creator, path_pattern):
+    endpoint = _create(service, db, creator, path_pattern)
+
+    assert endpoint.path_pattern == path_pattern
+
+
+def test_colon_param_is_not_translated_into_a_parameter():
+    regex = MappingService()._convert_pattern_to_regex("/users/:id")
+
+    assert not re.match(regex, "/users/7")
