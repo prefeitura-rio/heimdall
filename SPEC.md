@@ -23,7 +23,7 @@ Provide a secured REST API consumed by your Admin UI and trusted automation for:
 - Manage group ↔ role relations (what roles a group grants)
 - Manage memberships (add/remove users to/from groups)
 - Manage endpoint → action mappings (for adapter mapping service)
-- Manage group-management rights (which manager-groups can manage which target-groups)
+- ~~Manage group-management rights (which manager-groups can manage which target-groups)~~ — **not supported**: pattern-based delegation of group management is not implemented (see `group_management_rights` in Section 2)
 - Audit all admin operations (who, what, when, request metadata)
 - Push principal policies to Cerbos Admin API (optional; see modes)
 - Provide a mapping lookup endpoint (adapter uses it, with caching on adapter)
@@ -109,7 +109,11 @@ CREATE TABLE user_roles (
   PRIMARY KEY (user_id, role_id)
 );
 
--- group_management_rights
+-- group_management_rights (RESERVED, UNUSED)
+-- Pattern-based delegation of group management is NOT a supported feature.
+-- The table exists in the schema/migrations only; no endpoint reads or writes it
+-- and no authorization check consults it. Delegating group administration today
+-- requires a role granted through Cerbos (e.g. group_manager or admin).
 CREATE TABLE group_management_rights (
   id SERIAL PRIMARY KEY,
   manager_group_id INT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -199,7 +203,7 @@ Create a group.
 ```
 
 **Before DB write:**
-- Admin service calls Cerbos Check to verify caller has permission group:create (or group:manage) on that target group. (We require that only people with superadmin or go:admin or group-management rights create go:* groups.)
+- Admin service calls Cerbos Check to verify caller has permission group:create (or group:manage) on that target group. (We require that only people with superadmin or go:admin create go:* groups; pattern-based group-management rights are not supported.)
 
 **Cerbos check example payload:**
 ```json
@@ -236,7 +240,7 @@ Add member to group (delegation operation).
 **Flow:**
 1. Ensure caller user row exists (create if necessary).
 2. Build Cerbos check request asking if caller can group:add_member on group:{groupName}.
-3. If config uses group-management-rights DB table, you may enforce local checks too, but always call Cerbos to make the final decision.
+3. Cerbos is the only authorization source for this decision. Local checks based on the `group_management_rights` table are not supported (the table is reserved and unused).
 4. If allowed, create memberships row inside a DB transaction (upsert).
 5. If Admin Service is operating in push-to-Cerbos mode: create or update principal policy for bob in Cerbos Admin API to include the group's roles (or add role to existing principal policy). Wait for Admin API 200; on failure, roll back DB change or retry with backoff. Record in admin_audit.
 
