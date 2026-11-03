@@ -546,8 +546,18 @@ class MappingService(BaseService):
                 pattern = pattern + "$"
             return pattern
 
+        # A leading "^" and a trailing "$" are regex anchors, not literal path
+        # characters: scripts/manage_openapi_mappings.py stores routes without
+        # {param} as "<path>$", and the Redis fast path matches that raw pattern.
+        # Strip them before escaping so they are not turned into "\^" / "\$".
+        body = path_pattern
+        if body.startswith("^"):
+            body = body[1:]
+        if body.endswith("$") and not body.endswith("\\$"):
+            body = body[:-1]
+
         # Escape special regex characters except *, ?, and :
-        pattern = re.escape(path_pattern)
+        pattern = re.escape(body)
 
         # Handle path parameters like :id -> [^/]+
         pattern = re.sub(r"\\:([a-zA-Z_][a-zA-Z0-9_]*)", r"(?P<\1>[^/]+)", pattern)
@@ -558,13 +568,9 @@ class MappingService(BaseService):
         # Handle * for single path segment
         pattern = pattern.replace(r"\*", "[^/]*")
 
-        # Ensure exact match
-        if not pattern.startswith("^"):
-            pattern = "^" + pattern
-        if not pattern.endswith("$"):
-            pattern = pattern + "$"
-
-        return pattern
+        # Ensure exact match. The anchors were stripped above, so a "\$" left at
+        # the end is an escaped literal and must not count as an anchor.
+        return "^" + pattern + "$"
 
     def sync_all_mappings_to_redis(self, db: Session) -> bool:
         """
