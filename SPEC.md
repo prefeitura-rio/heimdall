@@ -50,7 +50,7 @@ CREATE TABLE actions (
 -- endpoints (mapping: many endpoint patterns -> one action)
 CREATE TABLE endpoints (
   id SERIAL PRIMARY KEY,
-  path_pattern TEXT NOT NULL,   -- e.g. '/courses', '/courses/*', '/courses/:id/enroll'
+  path_pattern TEXT NOT NULL,   -- e.g. '/courses', '/courses/*', '/courses/([^/]+)/enroll$'
   method TEXT NOT NULL,         -- 'GET','POST',... or 'ANY'
   action_id INT NOT NULL REFERENCES actions(id) ON DELETE RESTRICT,
   description TEXT,
