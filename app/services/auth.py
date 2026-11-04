@@ -3,6 +3,7 @@ Authentication service with OpenTelemetry tracing.
 Implements JWT verification and user management with distributed tracing.
 """
 
+import secrets
 from typing import Any
 
 import requests
@@ -179,7 +180,11 @@ class AuthService(BaseService):
                     span.set_attribute("auth.static_token_not_configured", True)
                     return False
 
-                is_valid = token == self.static_api_token
+                # Constant-time comparison (CWE-208): compare UTF-8 bytes so a
+                # non-ASCII token is rejected instead of raising TypeError.
+                is_valid = secrets.compare_digest(
+                    token.encode("utf-8"), self.static_api_token.encode("utf-8")
+                )
                 span.set_attribute("auth.token_valid", is_valid)
 
                 return is_valid
