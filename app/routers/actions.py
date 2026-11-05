@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
@@ -290,9 +291,14 @@ async def create_action(
         )
 
         if not can_create:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="action_create",
                 detail="Insufficient permissions to create actions",
+                target_type="action",
+                target_id=action_data.name,
+                request_payload=action_data.model_dump(),
             )
 
         # Create the action
@@ -314,6 +320,8 @@ async def create_action(
             endpoint_count=len(action.endpoints),
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -651,9 +659,17 @@ async def update_action(
         )
 
         if not can_update:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="action_update",
                 detail="Insufficient permissions to update actions",
+                target_type="action",
+                target_id=str(action_id),
+                request_payload={
+                    "action_id": action_id,
+                    **action_data.model_dump(exclude_unset=True),
+                },
             )
 
         # Update the action
@@ -672,6 +688,8 @@ async def update_action(
             endpoint_count=len(action.endpoints),
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -780,9 +798,14 @@ async def delete_action(
         )
 
         if not can_delete:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="action_delete",
                 detail="Insufficient permissions to delete actions",
+                target_type="action",
+                target_id=str(action_id),
+                request_payload={"action_id": action_id},
             )
 
         # Delete the action
@@ -796,6 +819,8 @@ async def delete_action(
 
         return  # 204 No Content
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:

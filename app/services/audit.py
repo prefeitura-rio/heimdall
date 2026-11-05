@@ -3,6 +3,7 @@ Audit service for logging admin operations with OpenTelemetry tracing.
 Implements comprehensive audit logging as specified in SPEC.md.
 """
 
+import contextlib
 from datetime import datetime
 from typing import Any
 
@@ -303,6 +304,43 @@ class AuditService(BaseService):
             # Audit logging should never fail the main operation
             # In production, this should be logged to a separate logging system
             return False
+
+    def log_authorization_denied(
+        self,
+        db: Session,
+        actor_subject: str,
+        operation: str,
+        reason: str,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        request_payload: dict[str, Any] | None = None,
+        actor_user_id: int | None = None,
+    ) -> bool:
+        """
+        Record an attempt refused by authorization (HTTP 403) with success=false.
+        SPEC.md: "If EFFECT_DENY -> return 403 to the caller and audit the attempt".
+        Never raises: a failed audit write is rolled back and the caller still
+        gets its 403. Returns True if the entry was written.
+        """
+        logged = self.safe_log_operation(
+            db=db,
+            actor_subject=actor_subject,
+            operation=operation,
+            target_type=target_type,
+            target_id=target_id,
+            request_payload=self._sanitize_request_payload(request_payload),
+            result={
+                "error": reason,
+                "status_code": 403,
+                "authorization": "denied",
+            },
+            success=False,
+            actor_user_id=actor_user_id,
+        )
+        if not logged:
+            with contextlib.suppress(Exception):
+                db.rollback()
+        return logged
 
     def get_audit_entries(
         self,

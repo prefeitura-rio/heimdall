@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -202,9 +203,14 @@ async def create_role(
     )
 
     if not can_create:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="create_role",
             detail=f"Permission denied to create role '{role_data.name}'",
+            target_type="role",
+            target_id=f"role:{role_data.name}",
+            request_payload=role_data.model_dump(),
         )
 
     # Create the role
@@ -433,9 +439,14 @@ async def list_group_roles(
     )
 
     if not can_view:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="view_group_roles",
             detail=f"Permission denied to view roles of group '{group_name}'",
+            target_type="group",
+            target_id=f"group:{group_name}",
+            request_payload={"group_name": group_name},
         )
 
     # Get group roles
@@ -484,9 +495,14 @@ async def assign_role_to_group(
     )
 
     if not can_assign:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="assign_role_to_group",
             detail=f"Permission denied to assign roles to group '{group_name}'",
+            target_type="role",
+            target_id=f"group:{group_name}:role:{assign_data.role_name}",
+            request_payload={"group_name": group_name, **assign_data.model_dump()},
         )
 
     # Assign role to group
@@ -544,9 +560,14 @@ async def remove_role_from_group(
     )
 
     if not can_remove:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="remove_role_from_group",
             detail=f"Permission denied to remove roles from group '{group_name}'",
+            target_type="role",
+            target_id=f"group:{group_name}:role:{role_name}",
+            request_payload={"group_name": group_name, "role_name": role_name},
         )
 
     # Remove role from group
@@ -677,9 +698,14 @@ async def list_role_actions(
     )
 
     if not can_view:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="view_role_actions",
             detail=f"Permission denied to view actions for role '{role_name}'",
+            target_type="role",
+            target_id=f"role:{role_name}",
+            request_payload={"role_name": role_name},
         )
 
     # Check if role exists
@@ -807,9 +833,14 @@ async def assign_action_to_role(
     """Add action permission to a role."""
     # Protect superadmin role from modification
     if role_name == "superadmin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="assign_action_to_role",
             detail="Cannot modify superadmin role: it is protected and has wildcard permissions",
+            target_type="role",
+            target_id=f"role:{role_name}:action:{action_data.action_name}",
+            request_payload={"role_name": role_name, **action_data.model_dump()},
         )
 
     # Get caller's roles for permission check
@@ -825,9 +856,14 @@ async def assign_action_to_role(
     )
 
     if not can_modify:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="assign_action_to_role",
             detail=f"Permission denied to modify actions for role '{role_name}'",
+            target_type="role",
+            target_id=f"role:{role_name}:action:{action_data.action_name}",
+            request_payload={"role_name": role_name, **action_data.model_dump()},
         )
 
     try:
@@ -965,9 +1001,14 @@ async def remove_action_from_role(
     """Remove action permission from a role."""
     # Protect superadmin role from modification
     if role_name == "superadmin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="remove_action_from_role",
             detail="Cannot modify superadmin role: it is protected and has wildcard permissions",
+            target_type="role",
+            target_id=f"role:{role_name}:action:{action_name}",
+            request_payload={"role_name": role_name, "action_name": action_name},
         )
 
     # Get caller's roles for permission check
@@ -983,9 +1024,14 @@ async def remove_action_from_role(
     )
 
     if not can_modify:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="remove_action_from_role",
             detail=f"Permission denied to modify actions for role '{role_name}'",
+            target_type="role",
+            target_id=f"role:{role_name}:action:{action_name}",
+            request_payload={"role_name": role_name, "action_name": action_name},
         )
 
     try:
@@ -1121,9 +1167,14 @@ async def delete_role(
 
         # Protect superadmin role from deletion
         if role_name == "superadmin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="delete_role",
                 detail="Cannot delete superadmin role: it is protected and immutable",
+                target_type="role",
+                target_id=f"role:{role_name}",
+                request_payload={"role_name": role_name},
             )
 
         # Check permission to delete this role
@@ -1136,9 +1187,14 @@ async def delete_role(
         )
 
         if not is_allowed:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="delete_role",
                 detail=f"Permission denied to delete role '{role_name}'",
+                target_type="role",
+                target_id=f"role:{role_name}",
+                request_payload={"role_name": role_name},
             )
 
         # Check if role is still assigned to groups (safety check)

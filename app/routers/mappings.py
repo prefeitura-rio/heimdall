@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden
 from app.database import get_db
 from app.dependencies import get_api_user, get_current_user
 from app.models import User
@@ -412,9 +413,14 @@ async def create_mapping(
     )
 
     if not can_create:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="create_mapping",
             detail="Permission denied to create mappings",
+            target_type="mapping",
+            target_id=f"mapping:{mapping_data.method}:{mapping_data.path_pattern}",
+            request_payload=mapping_data.model_dump(),
         )
 
     # Create the mapping
@@ -572,9 +578,17 @@ async def update_mapping(
     )
 
     if not can_update:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="update_mapping",
             detail=f"Permission denied to update mapping {mapping_id}",
+            target_type="mapping",
+            target_id=f"mapping:{mapping_id}",
+            request_payload={
+                "mapping_id": mapping_id,
+                **mapping_data.model_dump(exclude_unset=True),
+            },
         )
 
     # Update the mapping
@@ -682,9 +696,14 @@ async def delete_mapping(
     )
 
     if not can_delete:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="delete_mapping",
             detail=f"Permission denied to delete mapping {mapping_id}",
+            target_type="mapping",
+            target_id=f"mapping:{mapping_id}",
+            request_payload={"mapping_id": mapping_id},
         )
 
     # Delete the mapping

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
@@ -196,9 +197,14 @@ async def create_group(
     )
 
     if not can_create:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="create_group",
             detail=f"Permission denied to create group '{group_data.name}'",
+            target_type="group",
+            target_id=f"group:{group_data.name}",
+            request_payload=group_data.model_dump(),
         )
 
     # Create the group
@@ -408,9 +414,14 @@ async def delete_group(
     )
 
     if not can_delete:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="delete_group",
             detail=f"Permission denied to delete group '{group_name}'",
+            target_type="group",
+            target_id=f"group:{group_name}",
+            request_payload={"group_name": group_name},
         )
 
     # Delete the group with cascading cleanup
