@@ -1157,14 +1157,6 @@ async def delete_role(
         # Get caller's roles for permission check
         caller_roles = user_service.get_user_roles(db, current_user)
 
-        # Check if role exists
-        role = role_service.get_role_by_name(db, role_name)
-        if not role:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Role '{role_name}' not found",
-            )
-
         # Protect superadmin role from deletion
         if role_name == "superadmin":
             raise forbidden(
@@ -1195,6 +1187,15 @@ async def delete_role(
                 target_type="role",
                 target_id=f"role:{role_name}",
                 request_payload={"role_name": role_name},
+            )
+
+        # Check if role exists only after authorization, so a caller without
+        # role:delete cannot tell existing roles from missing ones (403 for both)
+        role = role_service.get_role_by_name(db, role_name)
+        if not role:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Role '{role_name}' not found",
             )
 
         # Check if role is still assigned to groups (safety check)
