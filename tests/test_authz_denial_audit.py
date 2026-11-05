@@ -403,3 +403,61 @@ def test_membership_denials_are_audited_by_the_service(method, operation, kwargs
     assert last["operation"] == operation
     assert last["actor_subject"] == "uuid-caller"
     assert last["success"] is False
+
+
+def test_nul_from_caller_input_never_reaches_the_audit_entry():
+    """PostgreSQL rejects NUL in text/JSONB: a denied caller must not skip the trail."""
+    db = MagicMock()
+
+    logged = AuditService().log_authorization_denied(
+        db=db,
+        actor_subject="uuid-caller",
+        operation="delete_group",
+        reason="Permission denied to delete group 'x\x00y'",
+        target_type="group",
+        target_id="group:x\x00y",
+        request_payload={"group_name": "x\x00y", "tags": ["a\x00"], "k\x00": 1},
+    )
+
+    assert logged is True
+    entry = db.add.call_args.args[0]
+    stored = repr(
+        (
+            entry.actor_subject,
+            entry.operation,
+            entry.target_type,
+            entry.target_id,
+            entry.request_payload,
+            entry.result,
+        )
+    )
+    assert "\x00" not in stored
+    assert "\\x00" not in stored
+    assert entry.target_id == "group:x\ufffdy"
+    assert entry.request_payload == {
+        "group_name": "x\ufffdy",
+        "tags": ["a\ufffd"],
+        "k\ufffd": 1,
+    }
+
+
+def test_audit_write_failure_is_logged_without_payload(caplog):
+    db = MagicMock()
+    db.commit.side_effect = RuntimeError("database unavailable")
+
+    with caplog.at_level("WARNING", logger="app.services.audit"):
+        logged = AuditService().log_authorization_denied(
+            db=db,
+            actor_subject="uuid-caller",
+            operation="create_group",
+            reason="Permission denied to create group 'g'",
+            target_type="group",
+            target_id="group:g",
+            request_payload={"description": "synthetic-payload-marker"},
+        )
+
+    assert logged is False
+    messages = [r for r in caplog.records if r.name == "app.services.audit"]
+    assert len(messages) == 1
+    assert "admin_audit" in messages[0].getMessage()
+    assert "synthetic-payload-marker" not in caplog.text
