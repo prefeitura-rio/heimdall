@@ -4,6 +4,7 @@ SPEC.md: "If EFFECT_DENY -> return 403 to the caller and audit the attempt".
 """
 
 import asyncio
+import contextlib
 import inspect
 from unittest.mock import MagicMock, patch
 
@@ -461,3 +462,36 @@ def test_audit_write_failure_is_logged_without_payload(caplog):
     assert len(messages) == 1
     assert "admin_audit" in messages[0].getMessage()
     assert "synthetic-payload-marker" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("method", "kwargs"),
+    [
+        ("add_member_to_group", {"member_subject": "uuid-member"}),
+        ("remove_member_from_group", {"member_subject": "uuid-member"}),
+        ("list_group_members", {}),
+    ],
+)
+def test_membership_denial_with_nul_group_name_is_still_audited(method, kwargs):
+    """The NUL guard lives in log_operation, so every audit path is covered."""
+    db = MagicMock()
+    service = MembershipService()
+    service.cerbos_service = MagicMock()
+    service.cerbos_service.check_permission.return_value = False
+
+    with contextlib.suppress(PermissionError):
+        getattr(service, method)(
+            db=db,
+            group_name="x\x00y",
+            caller_subject="uuid-caller",
+            caller_roles=["viewer"],
+            **kwargs,
+        )
+
+    entries = [call.args[0] for call in db.add.call_args_list]
+    assert entries, "denial must be audited"
+    entry = entries[-1]
+    assert entry.success is False
+    stored = repr((entry.target_id, entry.request_payload, entry.result))
+    assert "\x00" not in stored
+    assert "x\ufffdy" in stored

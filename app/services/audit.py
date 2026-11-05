@@ -53,6 +53,15 @@ class AuditService(BaseService):
         Log an admin operation to the audit table.
         Implements audit logging as specified in SPEC.md.
         """
+        # Values may come from the caller (path, body). PostgreSQL rejects NUL
+        # in text and JSONB, which would make the insert fail and drop the entry.
+        actor_subject = _strip_nul(actor_subject)
+        operation = _strip_nul(operation)
+        target_type = _strip_nul(target_type)
+        target_id = _strip_nul(target_id)
+        request_payload = _strip_nul(request_payload)
+        result = _strip_nul(result)
+
         with self.trace_operation(
             "log_operation",
             {
@@ -319,7 +328,11 @@ class AuditService(BaseService):
             return True
         except Exception:
             # Audit logging should never fail the main operation
-            # In production, this should be logged to a separate logging system
+            # Log the failure without the payload, which may carry user data
+            logger.warning(
+                "Failed to write entry to admin_audit",
+                extra={"operation": operation, "target_type": target_type},
+            )
             return False
 
     def log_authorization_denied(
@@ -336,20 +349,18 @@ class AuditService(BaseService):
         """
         Record an attempt refused by authorization (HTTP 403) with success=false.
         SPEC.md: "If EFFECT_DENY -> return 403 to the caller and audit the attempt".
-        Never raises: a failed audit write is rolled back, logged, and the caller
+        Never raises: a failed audit write is rolled back and logged, and the caller
         still gets its 403. Returns True if the entry was written.
         """
-        # Values come from the caller (path, body). PostgreSQL rejects NUL in
-        # text and JSONB, which would let a denied caller skip the audit trail.
         logged = self.safe_log_operation(
             db=db,
-            actor_subject=_strip_nul(actor_subject),
-            operation=_strip_nul(operation),
-            target_type=_strip_nul(target_type),
-            target_id=_strip_nul(target_id),
-            request_payload=_strip_nul(self._sanitize_request_payload(request_payload)),
+            actor_subject=actor_subject,
+            operation=operation,
+            target_type=target_type,
+            target_id=target_id,
+            request_payload=self._sanitize_request_payload(request_payload),
             result={
-                "error": _strip_nul(reason),
+                "error": reason,
                 "status_code": 403,
                 "authorization": "denied",
             },
@@ -359,10 +370,6 @@ class AuditService(BaseService):
         if not logged:
             with contextlib.suppress(Exception):
                 db.rollback()
-            logger.warning(
-                "Failed to write authorization denial to admin_audit",
-                extra={"operation": operation, "target_type": target_type},
-            )
         return logged
 
     def get_audit_entries(
