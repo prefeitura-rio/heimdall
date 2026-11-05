@@ -6,6 +6,7 @@ Implements group membership operations with distributed tracing.
 from opentelemetry import trace
 from sqlalchemy.orm import Session
 
+from app.exceptions import GroupNotFoundError
 from app.models import Group, Membership, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
@@ -79,12 +80,12 @@ class MembershipService(BaseService):
                 # Step 2: Database operations
                 with self.tracer.start_span("database_operations") as db_span:
                     # Find group before any write: a missing group must not
-                    # leave an auto-created user behind. The ValueError is
+                    # leave an auto-created user behind. The GroupNotFoundError is
                     # audited by the handler below and becomes a 404.
                     group = db.query(Group).filter(Group.name == group_name).first()
                     if not group:
                         span.set_attribute("membership.group_not_found", True)
-                        raise ValueError(f"Group '{group_name}' not found")
+                        raise GroupNotFoundError(group_name)
 
                     # Find or create user
                     user = db.query(User).filter(User.subject == member_subject).first()
@@ -377,7 +378,7 @@ class MembershipService(BaseService):
                     group = db.query(Group).filter(Group.name == group_name).first()
                     if not group:
                         group_span.set_attribute("group.found", False)
-                        raise ValueError(f"Group '{group_name}' not found")
+                        raise GroupNotFoundError(group_name)
 
                     group_span.set_attribute("group.found", True)
                     group_span.set_attribute("group.id", group.id)
