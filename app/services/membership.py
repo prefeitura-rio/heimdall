@@ -78,6 +78,14 @@ class MembershipService(BaseService):
 
                 # Step 2: Database operations
                 with self.tracer.start_span("database_operations") as db_span:
+                    # Find group before any write: a missing group must not
+                    # leave an auto-created user behind. The ValueError is
+                    # audited by the handler below and becomes a 404.
+                    group = db.query(Group).filter(Group.name == group_name).first()
+                    if not group:
+                        span.set_attribute("membership.group_not_found", True)
+                        raise ValueError(f"Group '{group_name}' not found")
+
                     # Find or create user
                     user = db.query(User).filter(User.subject == member_subject).first()
                     if not user:
@@ -85,15 +93,6 @@ class MembershipService(BaseService):
                         db.add(user)
                         db.flush()  # Get user ID
                         db_span.set_attribute("membership.user_created", True)
-
-                    # Find group
-                    group = db.query(Group).filter(Group.name == group_name).first()
-                    if not group:
-                        span.set_attribute("membership.group_not_found", True)
-                        span.set_status(
-                            trace.Status(trace.StatusCode.ERROR, "Group not found")
-                        )
-                        return False
 
                     # Check if membership already exists
                     existing = (
