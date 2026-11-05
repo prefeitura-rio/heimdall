@@ -353,16 +353,9 @@ async def add_member_to_group(
     # Get caller's roles for permission check
     caller_roles = user_service.get_user_roles(db, current_user)
 
-    # Ensure target user exists (auto-create if needed)
-    target_user = user_service.get_user_by_subject(db, member_data.subject)
-    if not target_user:
-        # Auto-create user if they don't exist
-        target_user = User(subject=member_data.subject)
-        db.add(target_user)
-        db.commit()
-        db.refresh(target_user)
-
-    # Add member to group with complete flow
+    # Add member to group with complete flow. The service checks the permission
+    # first and only then auto-creates the target user, so a denied call or a
+    # missing group never writes to `users`.
     try:
         success = membership_service.add_member_to_group(
             db=db,
