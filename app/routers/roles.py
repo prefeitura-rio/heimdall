@@ -13,6 +13,7 @@ from app.common.authz import forbidden
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.exceptions import GroupNotFoundError
 from app.models import User
 from app.services.action import ActionService
 from app.services.cerbos import CerbosService
@@ -464,9 +465,9 @@ async def list_group_roles(
             for role in roles
         ]
 
+    except GroupNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
