@@ -25,3 +25,26 @@ class CerbosUnavailableError(ServiceUnavailableError):
 
     def __init__(self, original_error: Exception | None = None):
         super().__init__("Cerbos Authorization Service", original_error)
+
+
+class CerbosResponseError(CerbosUnavailableError):
+    """
+    Exception raised when Cerbos answers without a usable decision (an error
+    payload or an unexpected format). It is a dependency failure, so it gets
+    the same 503 response as an unreachable Cerbos.
+    """
+
+    def __init__(self, detail: str):
+        self.detail = detail
+        super().__init__(RuntimeError(detail))
+
+
+class GroupNotFoundError(Exception):
+    """
+    Exception raised when an operation targets a group that does not exist.
+    Should result in HTTP 404 Not Found response.
+    """
+
+    def __init__(self, group_name: str):
+        self.group_name = group_name
+        super().__init__(f"Group '{group_name}' not found")

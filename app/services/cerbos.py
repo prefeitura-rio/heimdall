@@ -10,7 +10,7 @@ from typing import Any
 import requests
 from opentelemetry import trace
 
-from app.exceptions import CerbosUnavailableError
+from app.exceptions import CerbosResponseError, CerbosUnavailableError
 from app.services.base import BaseService
 from app.settings import settings
 
@@ -141,9 +141,11 @@ class CerbosService(BaseService):
                     span.set_attribute("cerbos.missing_results_field", True)
                     if "error" in resp_data:
                         span.set_attribute("cerbos.error_response", resp_data["error"])
-                        raise ValueError(f"Cerbos error: {resp_data['error']}")
+                        raise CerbosResponseError(f"Cerbos error: {resp_data['error']}")
                     else:
-                        raise ValueError(f"Unexpected Cerbos response format: {resp_data}")
+                        raise CerbosResponseError(
+                            f"Unexpected Cerbos response format: {resp_data}"
+                        )
 
                 # Cerbos API returns results[0].actions[action] format
                 result = resp_data["results"][0]["actions"][action]

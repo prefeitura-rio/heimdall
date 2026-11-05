@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.exceptions import GroupNotFoundError
 from app.models import User
 from app.services.membership import MembershipService
 from app.services.user import UserService
@@ -222,9 +223,9 @@ async def list_group_members(
 
         return member_responses
 
+    except GroupNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except PermissionError:
         raise HTTPException(
@@ -379,9 +380,9 @@ async def add_member_to_group(
             status="member_added", group=group_name, subject=member_data.subject
         )
 
+    except GroupNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
@@ -498,7 +499,7 @@ async def remove_member_from_group(
         from app.services.policy_invalidator import invalidate_policy_version
         invalidate_policy_version(db)
 
+    except GroupNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
