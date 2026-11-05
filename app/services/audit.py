@@ -3,6 +3,8 @@ Audit service for logging admin operations with OpenTelemetry tracing.
 Implements comprehensive audit logging as specified in SPEC.md.
 """
 
+import contextlib
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -11,6 +13,22 @@ from sqlalchemy.orm import Session
 
 from app.models import AdminAudit, User
 from app.services.base import BaseService
+
+logger = logging.getLogger(__name__)
+
+_NUL = "\x00"
+_NUL_REPLACEMENT = "\ufffd"
+
+
+def _strip_nul(value: Any) -> Any:
+    """Replace NUL characters, which PostgreSQL text and JSONB cannot store."""
+    if isinstance(value, str):
+        return value.replace(_NUL, _NUL_REPLACEMENT)
+    if isinstance(value, dict):
+        return {_strip_nul(k): _strip_nul(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_nul(item) for item in value]
+    return value
 
 
 class AuditService(BaseService):
@@ -35,6 +53,15 @@ class AuditService(BaseService):
         Log an admin operation to the audit table.
         Implements audit logging as specified in SPEC.md.
         """
+        # Values may come from the caller (path, body). PostgreSQL rejects NUL
+        # in text and JSONB, which would make the insert fail and drop the entry.
+        actor_subject = _strip_nul(actor_subject)
+        operation = _strip_nul(operation)
+        target_type = _strip_nul(target_type)
+        target_id = _strip_nul(target_id)
+        request_payload = _strip_nul(request_payload)
+        result = _strip_nul(result)
+
         with self.trace_operation(
             "log_operation",
             {
@@ -301,8 +328,49 @@ class AuditService(BaseService):
             return True
         except Exception:
             # Audit logging should never fail the main operation
-            # In production, this should be logged to a separate logging system
+            # Log the failure without the payload, which may carry user data
+            logger.warning(
+                "Failed to write entry to admin_audit",
+                extra={"operation": operation, "target_type": target_type},
+            )
             return False
+
+    def log_authorization_denied(
+        self,
+        db: Session,
+        actor_subject: str,
+        operation: str,
+        reason: str,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        request_payload: dict[str, Any] | None = None,
+        actor_user_id: int | None = None,
+    ) -> bool:
+        """
+        Record an attempt refused by authorization (HTTP 403) with success=false.
+        SPEC.md: "If EFFECT_DENY -> return 403 to the caller and audit the attempt".
+        Never raises: a failed audit write is rolled back and logged, and the caller
+        still gets its 403. Returns True if the entry was written.
+        """
+        logged = self.safe_log_operation(
+            db=db,
+            actor_subject=actor_subject,
+            operation=operation,
+            target_type=target_type,
+            target_id=target_id,
+            request_payload=self._sanitize_request_payload(request_payload),
+            result={
+                "error": reason,
+                "status_code": 403,
+                "authorization": "denied",
+            },
+            success=False,
+            actor_user_id=actor_user_id,
+        )
+        if not logged:
+            with contextlib.suppress(Exception):
+                db.rollback()
+        return logged
 
     def get_audit_entries(
         self,
