@@ -6,6 +6,7 @@ Implements role management operations with Cerbos policy synchronization.
 from opentelemetry import trace
 from sqlalchemy.orm import Session
 
+from app.exceptions import GroupNotFoundError
 from app.models import Action, Group, GroupRole, Role, RoleAction, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
@@ -144,7 +145,7 @@ class RoleService(BaseService):
                 group = db.query(Group).filter(Group.name == group_name).first()
                 if not group:
                     span.set_attribute("role.group_not_found", True)
-                    raise ValueError(f"Group '{group_name}' not found")
+                    raise GroupNotFoundError(group_name)
 
                 span.set_attribute("role.group_id", group.id)
 
