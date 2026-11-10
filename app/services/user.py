@@ -121,8 +121,8 @@ class UserService(BaseService):
                 if db.is_modified(user):
                     db.commit()
                     logger.logger.info(
-                        f"Committed pending updates for user {user.subject} (no admin role)",
-                        extra={"user_subject": user.subject}
+                        "Committed pending user updates (no admin role)",
+                        extra={"user_id": user.id},
                     )
                 return
 
@@ -140,8 +140,8 @@ class UserService(BaseService):
                 if db.is_modified(user):
                     db.commit()
                     logger.logger.info(
-                        f"Committed pending updates for user {user.subject}",
-                        extra={"user_subject": user.subject}
+                        "Committed pending user updates",
+                        extra={"user_id": user.id},
                     )
                 return
 
@@ -177,9 +177,8 @@ class UserService(BaseService):
             span.record_exception(e)
             span.set_attribute("user.superadmin_assignment_error", str(e))
             logger.logger.error(
-                f"Failed to assign/remove superadmin role for user {user.subject}",
+                "Failed to assign/remove superadmin role",
                 extra={
-                    "user_subject": user.subject,
                     "user_id": user.id,
                     "error": str(e),
                     "error_type": type(e).__name__,
@@ -191,17 +190,15 @@ class UserService(BaseService):
 
     def _has_admin_role(self, jwt_payload: dict[str, Any]) -> bool:
         """Check if user has admin role in Keycloak client roles."""
-        subject = jwt_payload.get("subject", "unknown")
-
         # Check in resource_access (client-specific roles)
         resource_access = jwt_payload.get("resource_access", {})
         client_access = resource_access.get(self.keycloak_client_id, {})
         client_roles = client_access.get("roles", [])
 
+        # Runs on every authenticated request: never log the subject (CPF) here.
         logger.logger.info(
-            f"Checking admin role for user {subject}",
+            "Checking admin role",
             extra={
-                "user_subject": subject,
                 "expected_role": self.admin_role_name,
                 "expected_client_id": self.keycloak_client_id,
                 "resource_access_clients": list(resource_access.keys()),
@@ -213,18 +210,16 @@ class UserService(BaseService):
 
         if has_role:
             logger.logger.info(
-                f"User {subject} has admin role",
+                "User has admin role",
                 extra={
-                    "user_subject": subject,
                     "role": self.admin_role_name,
                     "client_id": self.keycloak_client_id,
                 }
             )
         else:
             logger.logger.info(
-                f"User {subject} does not have admin role",
+                "User does not have admin role",
                 extra={
-                    "user_subject": subject,
                     "expected_role": self.admin_role_name,
                     "expected_client_id": self.keycloak_client_id,
                     "available_client_roles": client_roles,
@@ -256,9 +251,8 @@ class UserService(BaseService):
                 span.set_attribute("user.removed_superadmin", True)
 
                 logger.logger.warning(
-                    f"Removed superadmin role from user {user.subject} (no longer has admin role in JWT)",
+                    "Removed superadmin role from user (no longer has admin role in JWT)",
                     extra={
-                        "user_subject": user.subject,
                         "user_id": user.id,
                         "action": "superadmin_role_removed"
                     }
@@ -269,17 +263,16 @@ class UserService(BaseService):
                 if db.is_modified(user):
                     db.commit()
                     logger.logger.info(
-                        f"Committed pending updates for user {user.subject} (no superadmin to remove)",
-                        extra={"user_subject": user.subject}
+                        "Committed pending user updates (no superadmin to remove)",
+                        extra={"user_id": user.id},
                     )
 
         except Exception as e:
             span.record_exception(e)
             span.set_attribute("user.superadmin_removal_error", str(e))
             logger.logger.error(
-                f"Failed to remove superadmin role from user {user.subject}",
+                "Failed to remove superadmin role",
                 extra={
-                    "user_subject": user.subject,
                     "user_id": user.id,
                     "error": str(e),
                     "error_type": type(e).__name__,
