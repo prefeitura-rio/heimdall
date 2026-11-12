@@ -267,6 +267,65 @@ def test_get_or_create_user_new_user_does_not_export_name_or_email(
     _assert_no_cpf(exporter)
 
 
+def _integrity_error_from_engine(tmp_path):
+    """A real IntegrityError raised by the app's engine on a duplicate subject."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    from app import database
+
+    with patch.object(
+        database, "get_database_url", return_value=f"sqlite:///{tmp_path / 'u.db'}"
+    ):
+        engine = database.create_database_engine()
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE u (subject TEXT UNIQUE, display_name TEXT)"))
+        conn.execute(
+            text("INSERT INTO u VALUES (:s, :n)"), {"s": CPF, "n": "Outra Pessoa"}
+        )
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO u VALUES (:s, :n)"), {"s": CPF, "n": NAME})
+    except IntegrityError as exc:
+        return exc
+    finally:
+        engine.dispose()
+    raise AssertionError("expected a duplicate-subject IntegrityError")
+
+
+def test_database_errors_do_not_carry_query_parameters(tmp_path):
+    exc = _integrity_error_from_engine(tmp_path)
+
+    assert NAME not in str(exc) and CPF not in str(exc)
+
+
+def test_get_or_create_user_db_error_does_not_export_name(
+    exporter, traced, user_service, tmp_path
+):
+    """DEV-544: a failed insert must not ship the display name in the span."""
+    traced(user_service)
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None
+    db.commit.side_effect = _integrity_error_from_engine(tmp_path)
+    payload = {"subject": CPF, "name": NAME, "email": EMAIL, "resource_access": {}}
+
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        user_service.get_or_create_user(db, payload)
+
+    spans = exporter.get_finished_spans()
+    assert spans
+    for span in spans:
+        texts = [str(v) for v in (span.attributes or {}).values()]
+        texts += [str(dict(e.attributes or {})) for e in span.events]
+        texts.append(str(span.status.description))
+        for text_value in texts:
+            assert NAME not in text_value and EMAIL not in text_value, (
+                f"name/e-mail leaked into span {span.name!r}: {text_value!r}"
+            )
+
+
 def test_get_user_by_subject_does_not_export_cpf(exporter, traced, user_service):
     traced(user_service)
     db = MagicMock()
