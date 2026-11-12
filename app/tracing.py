@@ -11,8 +11,13 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
+from opentelemetry.trace import Status
 
 from app.settings import settings
 
@@ -72,8 +77,8 @@ def setup_tracing() -> bool:
         insecure=True,  # Use insecure connection for development
     )
 
-    # Add batch span processor
-    span_processor = BatchSpanProcessor(otlp_exporter)
+    # Add batch span processor; nothing leaves the process with a CPF in clear
+    span_processor = BatchSpanProcessor(CpfRedactingSpanExporter(otlp_exporter))
     provider.add_span_processor(span_processor)
 
     return True
@@ -154,3 +159,55 @@ def create_span(tracer, name: str, attributes: dict[str, Any] | None = None):
         for key, value in attributes.items():
             span.set_attribute(key, redact_cpf(value))
     return span
+
+
+def _redact_attributes(attributes):
+    if not attributes:
+        return attributes
+    return {key: redact_cpf(value) for key, value in attributes.items()}
+
+
+def redact_span(span: ReadableSpan) -> ReadableSpan:
+    """Copy of a finished span with every CPF-shaped value masked.
+
+    Covers what the call sites cannot: the request path the FastAPI
+    instrumentation records (``http.target``/``http.url`` of ``GET
+    /api/v1/users/{cpf}``), error messages and exception events, and the
+    status description.
+    """
+    status = span.status
+    if status.description:
+        status = Status(status.status_code, redact_cpf(status.description))
+    return ReadableSpan(
+        name=redact_cpf(span.name),
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=_redact_attributes(span.attributes),
+        events=[
+            Event(event.name, _redact_attributes(event.attributes), event.timestamp)
+            for event in span.events
+        ],
+        links=span.links,
+        kind=span.kind,
+        status=status,
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=span.instrumentation_scope,
+    )
+
+
+class CpfRedactingSpanExporter(SpanExporter):
+    """Exporter wrapper that masks CPFs in every span before it is exported."""
+
+    def __init__(self, exporter: SpanExporter) -> None:
+        self._exporter = exporter
+
+    def export(self, spans) -> SpanExportResult:
+        return self._exporter.export([redact_span(span) for span in spans])
+
+    def shutdown(self) -> None:
+        self._exporter.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._exporter.force_flush(timeout_millis)

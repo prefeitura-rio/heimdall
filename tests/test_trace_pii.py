@@ -4,7 +4,10 @@ Every span attribute is exported over OTLP to the tracing backend. These tests
 run each flow that used to put the subject in a span attribute (JWT auth, user
 lookup and roles, roles cache, Cerbos, memberships, audit) against an in-memory
 span exporter and assert that no attribute value carries the (synthetic) CPF,
-while the internal ``user.user_id`` is still there for correlation.
+while the internal ``user.user_id`` is still there for correlation. The last
+tests cover the exporter filter that masks what the call sites cannot: the raw
+request path recorded by the FastAPI instrumentation, error messages, exception
+events and the status description.
 """
 
 import time
@@ -13,12 +16,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from jose import jwk, jwt
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
+from opentelemetry.trace import Status, StatusCode
 
 from app.services.audit import AuditService
 from app.services.auth import AuthService
@@ -26,7 +33,14 @@ from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
 from app.services.membership import MembershipService
 from app.services.user import UserService
-from app.tracing import CPF_PLACEHOLDER, create_span, redact_cpf, subject_kind
+from app.tracing import (
+    CPF_PLACEHOLDER,
+    CpfRedactingSpanExporter,
+    create_span,
+    redact_cpf,
+    setup_tracing,
+    subject_kind,
+)
 
 CPF = "98765432100"  # synthetic
 CPF_FORMATTED = "987.654.321-00"
@@ -403,3 +417,93 @@ def test_audit_keeps_system_actor_in_span(exporter, traced):
         _attribute(exporter, "audit.log_operation", "audit.actor")
         == "system:background_tasks"
     )
+
+
+# --- exporter: request spans, errors and exception events --------------------
+
+
+def _api() -> FastAPI:
+    api = FastAPI()
+
+    @api.get("/api/v1/users/{cpf}")
+    def read_user(cpf: str):
+        if cpf == CPF_FORMATTED:
+            raise HTTPException(status_code=404, detail=f"User {cpf} not found")
+        return {"ok": True}
+
+    return api
+
+
+def _instrumented_client(exporter, redacting: bool) -> TestClient:
+    provider = TracerProvider()
+    target = CpfRedactingSpanExporter(exporter) if redacting else exporter
+    provider.add_span_processor(SimpleSpanProcessor(target))
+    api = _api()
+    FastAPIInstrumentor.instrument_app(api, tracer_provider=provider)
+    return TestClient(api)
+
+
+def _everything_exported(exporter) -> str:
+    parts = []
+    for span in exporter.get_finished_spans():
+        parts.append(span.name)
+        parts.append(str(dict(span.attributes or {})))
+        parts.append(str(span.status.description))
+        for event in span.events:
+            parts.append(str(dict(event.attributes or {})))
+    return "\n".join(parts)
+
+
+def test_request_path_with_cpf_reaches_spans_without_the_filter(exporter):
+    # Sanity check of the scenario: the FastAPI instrumentation records the raw
+    # path (http.target / http.url), so without the exporter filter it leaks.
+    client = _instrumented_client(exporter, redacting=False)
+    assert client.get(f"/api/v1/users/{CPF}").status_code == 200
+    assert CPF in _everything_exported(exporter)
+
+
+def test_exporter_masks_cpf_in_request_path_and_query(exporter):
+    client = _instrumented_client(exporter, redacting=True)
+
+    assert client.get(f"/api/v1/users/{CPF}?cpf={CPF}").status_code == 200
+    assert client.get(f"/api/v1/users/{CPF_FORMATTED}").status_code == 404
+
+    exported = _everything_exported(exporter)
+    assert CPF not in exported and CPF_FORMATTED not in exported
+    assert CPF_PLACEHOLDER in exported
+    server = [s for s in exporter.get_finished_spans() if s.kind.name == "SERVER"]
+    assert server and all(
+        s.attributes.get("http.route") == "/api/v1/users/{cpf}" for s in server
+    )
+
+
+def test_exporter_masks_cpf_in_error_status_and_exception_event(exporter):
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(CpfRedactingSpanExporter(exporter)))
+    tracer = provider.get_tracer("test")
+    with tracer.start_as_current_span(f"lookup {CPF}") as span:
+        error = ValueError(f"duplicate key (subject)=({CPF})")
+        span.record_exception(error)
+        span.set_attribute("user.error", str(error))
+        span.set_status(Status(StatusCode.ERROR, str(error)))
+
+    exported = _everything_exported(exporter)
+    assert CPF not in exported
+    (finished,) = exporter.get_finished_spans()
+    assert finished.name == f"lookup {CPF_PLACEHOLDER}"
+    assert finished.events[0].attributes["exception.type"] == "ValueError"
+
+
+def test_setup_tracing_wraps_the_otlp_exporter():
+    with (
+        patch("app.tracing.is_tracing_enabled", return_value=True),
+        patch("app.tracing.get_otlp_endpoint", return_value="collector:4317"),
+        patch("app.tracing.OTLPSpanExporter") as otlp,
+        patch("app.tracing.BatchSpanProcessor") as batch,
+        patch("app.tracing.trace.set_tracer_provider"),
+    ):
+        assert setup_tracing() is True
+
+    (wrapped,), _ = batch.call_args
+    assert isinstance(wrapped, CpfRedactingSpanExporter)
+    assert wrapped._exporter is otlp.return_value
