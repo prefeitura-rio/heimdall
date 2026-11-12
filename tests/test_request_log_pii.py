@@ -208,6 +208,36 @@ def test_masking_keeps_non_cpf_numbers_and_booleans(main):
         "id": 12345678901234,
     }
     assert redact({"subject": int(CPF)}) == {"subject": CPF_PLACEHOLDER}
+    assert redact({"subject": float(CPF)}) == {"subject": CPF_PLACEHOLDER}
+    assert redact({"subject": 1234567890}) == {"subject": CPF_PLACEHOLDER}
+    assert redact({"subject": 1234567890.0}) == {"subject": CPF_PLACEHOLDER}
+    assert redact([3.5, float("inf"), float("nan")])[:2] == [3.5, float("inf")]
+
+
+def test_validation_error_masks_a_cpf_sent_as_decimal_or_without_leading_zero(
+    client, captured
+):
+    decimal = client.post(
+        f"/__test_dev_542/validation/{CPF}",
+        json={"count": 1, "subject": float(CPF)},
+    )
+    short = client.post(
+        f"/__test_dev_542/validation/{CPF}",
+        json={"count": 1, "subject": 1234567890},
+    )
+
+    assert decimal.status_code == short.status_code == 422
+    _assert_no_cpf(captured)
+    for line in captured.lines:
+        assert "98765432100.0" not in line
+        assert "1234567890" not in line
+    entries = [
+        e for e in captured.entries() if e.get("operation") == "validation_exception"
+    ]
+    assert [e["validation_errors"][0]["input"] for e in entries] == [
+        CPF_PLACEHOLDER,
+        CPF_PLACEHOLDER,
+    ]
 
 
 def test_percent_encoded_cpf_in_the_query_is_masked(client, captured):

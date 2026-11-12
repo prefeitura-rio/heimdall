@@ -3,6 +3,7 @@ FastAPI application entry point for Heimdall Admin Service.
 Implements OpenTelemetry tracing setup as specified in SPEC.md Section 6.
 """
 
+import math
 import os
 import time
 from typing import Any
@@ -42,6 +43,7 @@ from app.services.database_monitor import setup_database_monitoring  # noqa: E40
 from app.services.health_monitor import HealthMonitor  # noqa: E402
 from app.settings import settings, validate_environment  # noqa: E402
 from app.tracing import (  # noqa: E402
+    CPF_PLACEHOLDER,
     instrument_fastapi,
     instrument_sqlalchemy,
     redact_cpf,
@@ -251,8 +253,10 @@ app.add_middleware(
 def _redact_for_log(value: Any) -> Any:
     """Mask CPFs anywhere in a value bound for the logs (DEV-542).
 
-    Strings, dict keys and integers are checked: a CPF sent as a JSON number
-    (``{"subject": 98765432100}``) reaches the validation errors as an ``int``.
+    Strings, dict keys and numbers are checked: a CPF sent as a JSON number
+    (``{"subject": 98765432100}`` or ``98765432100.0``) reaches the validation
+    errors as an ``int`` or a ``float``, and a CPF that starts with zero loses
+    that digit (10 digits left).
     """
     if isinstance(value, dict):
         return {
@@ -260,10 +264,16 @@ def _redact_for_log(value: Any) -> Any:
         }
     if isinstance(value, list | tuple):
         return [_redact_for_log(item) for item in value]
-    if isinstance(value, int) and not isinstance(value, bool):
-        masked = redact_cpf(str(value))
-        return value if masked == str(value) else masked
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return CPF_PLACEHOLDER if _is_cpf_shaped_number(value) else value
     return redact_cpf(value)
+
+
+def _is_cpf_shaped_number(value: int | float) -> bool:
+    """Whether a JSON number could be a CPF: 10 or 11 digits in its integer part."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return False
+    return len(str(abs(int(value)))) in (10, 11)
 
 
 def _log_route(request: Request) -> str:
