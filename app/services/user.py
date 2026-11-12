@@ -77,7 +77,8 @@ class UserService(BaseService):
 
                 span.set_attribute("user.created_new", True)
                 span.set_attribute("user.user_id", user.id)
-                span.set_attribute("user.display_name", display_name or "")
+                # Never the display name in a span: it is the person's name or e-mail.
+                span.set_attribute("user.display_name_present", bool(display_name))
 
                 return user
 

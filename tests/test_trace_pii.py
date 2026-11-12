@@ -228,6 +228,45 @@ def test_get_or_create_user_does_not_export_cpf(exporter, traced, user_service):
     _assert_no_cpf(exporter)
 
 
+NAME = "Fulana de Tal"  # synthetic
+EMAIL = "fulana.sintetica@example.test"  # synthetic
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"name": NAME, "email": EMAIL},
+        {"email": EMAIL},  # display name falls back to the e-mail
+    ],
+)
+def test_get_or_create_user_new_user_does_not_export_name_or_email(
+    exporter, traced, user_service, claims
+):
+    """DEV-544: creating a user must not export the display name (name/e-mail)."""
+    traced(user_service)
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None
+    db.query.return_value.join.return_value.filter.return_value.first.return_value = (
+        None
+    )
+    payload = {"subject": CPF, "resource_access": {}, **claims}
+
+    user = user_service.get_or_create_user(db, payload)
+
+    assert user.display_name == claims.get("name", EMAIL)
+    assert _attribute(exporter, "user.get_or_create_user", "user.created_new") is True
+    assert (
+        _attribute(exporter, "user.get_or_create_user", "user.display_name_present")
+        is True
+    )
+    for span_name, key, value in _attributes(exporter):
+        text = str(value)
+        assert NAME not in text and EMAIL not in text, (
+            f"name/e-mail leaked into span {span_name!r} attribute {key!r}"
+        )
+    _assert_no_cpf(exporter)
+
+
 def test_get_user_by_subject_does_not_export_cpf(exporter, traced, user_service):
     traced(user_service)
     db = MagicMock()
