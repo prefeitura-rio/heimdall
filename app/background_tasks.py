@@ -243,7 +243,7 @@ class BackgroundTaskService(BaseService):
                                         level=30,  # WARNING
                                         message="Failed to update policy for user",
                                         operation="reconcile_policy_update_failed",
-                                        extra_fields={"user_subject": user.subject},
+                                        extra_fields={"user_id": user.id},
                                     )
                             else:
                                 # User has no roles, delete their policy if it exists
@@ -283,7 +283,7 @@ class BackgroundTaskService(BaseService):
                                 message="Error processing user during reconciliation",
                                 operation="reconcile_user_error",
                                 extra_fields={
-                                    "user_subject": user.subject,
+                                    "user_id": user.id,
                                     "error": str(e),
                                     "exception_type": type(e).__name__,
                                 },

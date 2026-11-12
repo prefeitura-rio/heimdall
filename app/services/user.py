@@ -41,7 +41,8 @@ class UserService(BaseService):
 
         with self.trace_operation(
             "get_or_create_user",
-            {"user.subject": subject, "user.operation": "get_or_create"},
+            # Never the subject (CPF) in a span: user.user_id is set once known.
+            {"user.operation": "get_or_create"},
         ) as span:
             try:
                 # Try to find existing user
@@ -285,7 +286,7 @@ class UserService(BaseService):
         """Get user by subject with tracing."""
         with self.trace_operation(
             "get_user_by_subject",
-            {"user.subject": subject, "user.operation": "get_by_subject"},
+            {"user.operation": "get_by_subject"},
         ) as span:
             try:
                 user = db.query(User).filter(User.subject == subject).first()
@@ -313,7 +314,6 @@ class UserService(BaseService):
             "get_user_roles",
             {
                 "user.user_id": user.id,
-                "user.subject": user.subject,
                 "user.operation": "get_roles",
             },
         ) as span:
@@ -366,7 +366,6 @@ class UserService(BaseService):
             "get_user_groups",
             {
                 "user.user_id": user.id,
-                "user.subject": user.subject,
                 "user.operation": "get_groups",
             },
         ) as span:

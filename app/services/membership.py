@@ -12,6 +12,7 @@ from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
+from app.tracing import subject_kind
 
 
 class MembershipService(BaseService):
@@ -36,8 +37,7 @@ class MembershipService(BaseService):
             "add_member_to_group",
             {
                 "membership.group_name": group_name,
-                "membership.member_subject": member_subject,
-                "membership.caller_subject": caller_subject,
+                "membership.caller": subject_kind(caller_subject),
                 "membership.operation": "add_member",
             },
         ) as span:
@@ -215,8 +215,7 @@ class MembershipService(BaseService):
             "remove_member_from_group",
             {
                 "membership.group_name": group_name,
-                "membership.member_subject": member_subject,
-                "membership.caller_subject": caller_subject,
+                "membership.caller": subject_kind(caller_subject),
                 "membership.operation": "remove_member",
             },
         ) as span:
@@ -349,7 +348,7 @@ class MembershipService(BaseService):
             "list_group_members",
             {
                 "membership.group_name": group_name,
-                "membership.caller_subject": caller_subject,
+                "membership.caller": subject_kind(caller_subject),
                 "membership.operation": "list_members",
             },
         ) as span:

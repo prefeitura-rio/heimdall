@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AdminAudit, User
 from app.services.base import BaseService
+from app.tracing import subject_kind
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class AuditService(BaseService):
         with self.trace_operation(
             "log_operation",
             {
-                "audit.actor_subject": actor_subject,
+                "audit.actor": subject_kind(actor_subject),
                 "audit.operation": operation,
                 "audit.target_type": target_type,
                 "audit.target_id": target_id,
@@ -389,7 +390,7 @@ class AuditService(BaseService):
         with self.trace_operation(
             "get_audit_entries",
             {
-                "audit.actor_subject": actor_subject,
+                "audit.actor": subject_kind(actor_subject),
                 "audit.operation": operation,
                 "audit.target_type": target_type,
                 "audit.success": success,

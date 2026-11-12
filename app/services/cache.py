@@ -258,7 +258,7 @@ class CacheService(BaseService):
             {
                 "cache.type": "user_roles",
                 "cache.operation": "invalidate",
-                "cache.user_subject": user_subject,
+                "cache.all_users": user_subject is None,
             },
         ) as span:
             try:

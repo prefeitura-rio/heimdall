@@ -146,7 +146,8 @@ class AuthService(BaseService):
                 }
 
                 span.set_attribute("auth.token_valid", True)
-                span.set_attribute("auth.user_subject", user_info["subject"])
+                # The subject is the citizen's CPF: never export it in a span.
+                span.set_attribute("auth.subject_present", bool(user_info["subject"]))
                 span.set_attribute("auth.verification_skipped", False)
 
                 return user_info
