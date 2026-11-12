@@ -3,8 +3,11 @@ FastAPI application entry point for Heimdall Admin Service.
 Implements OpenTelemetry tracing setup as specified in SPEC.md Section 6.
 """
 
+import math
 import os
 import time
+from typing import Any
+from urllib.parse import unquote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, status
@@ -40,8 +43,10 @@ from app.services.database_monitor import setup_database_monitoring  # noqa: E40
 from app.services.health_monitor import HealthMonitor  # noqa: E402
 from app.settings import settings, validate_environment  # noqa: E402
 from app.tracing import (  # noqa: E402
+    CPF_PLACEHOLDER,
     instrument_fastapi,
     instrument_sqlalchemy,
+    redact_cpf,
     setup_tracing,
 )
 
@@ -245,6 +250,50 @@ app.add_middleware(
 )
 
 
+def _redact_for_log(value: Any) -> Any:
+    """Mask CPFs anywhere in a value bound for the logs (DEV-542).
+
+    Strings, dict keys and numbers are checked: a CPF sent as a JSON number
+    (``{"subject": 98765432100}`` or ``98765432100.0``) reaches the validation
+    errors as an ``int`` or a ``float``, and a CPF that starts with zero loses
+    that digit (10 digits left).
+    """
+    if isinstance(value, dict):
+        return {
+            _redact_for_log(key): _redact_for_log(item) for key, item in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [_redact_for_log(item) for item in value]
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return CPF_PLACEHOLDER if _is_cpf_shaped_number(value) else value
+    return redact_cpf(value)
+
+
+def _is_cpf_shaped_number(value: int | float) -> bool:
+    """Whether a JSON number could be a CPF: 10 or 11 digits in its integer part."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return False
+    return len(str(abs(int(value)))) in (10, 11)
+
+
+def _log_route(request: Request) -> str:
+    """The request path as it may be logged: never the citizen's CPF (DEV-542).
+
+    The matched route's template (``/api/v1/users/{cpf}``,
+    ``/api/v1/groups/{group_name}/members/{subject}``) when the request reached a
+    route; otherwise (no route matched) the raw path with CPFs masked.
+    """
+    template = getattr(request.scope.get("route"), "path_format", None)
+    if isinstance(template, str) and template:
+        return template
+    return redact_cpf(request.url.path)
+
+
+def _log_url(request: Request) -> str:
+    """The full request URL (query string included, percent-decoded) with CPFs masked."""
+    return redact_cpf(unquote(str(request.url)))
+
+
 # Add request/response logging middleware
 @app.middleware("http")
 async def logging_middleware(request: Request, call_next) -> Response:
@@ -265,11 +314,12 @@ async def logging_middleware(request: Request, call_next) -> Response:
     # Calculate duration
     duration_ms = (time.time() - start_time) * 1000
 
-    # Log the request/response
+    # Log the request/response: the route template, never the raw path (DEV-542)
+    route = _log_route(request)
     logger.log_http_request(
-        message=f"{request.method} {request.url.path} -> {response.status_code}",
+        message=f"{request.method} {route} -> {response.status_code}",
         method=request.method,
-        path=str(request.url.path),
+        path=route,
         status_code=response.status_code,
         duration_ms=duration_ms,
         user_agent=user_agent,
@@ -312,9 +362,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             operation="http_exception",
             extra_fields={
                 "status_code": exc.status_code,
-                "detail": exc.detail,
+                "detail": _redact_for_log(exc.detail),
                 "method": request.method,
-                "url": str(request.url),
+                "url": _log_url(request),
+                "route": _log_route(request),
                 "exception_type": "HTTPException",
             },
         )
@@ -340,9 +391,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             message="Request validation error",
             operation="validation_exception",
             extra_fields={
-                "validation_errors": exc.errors(),
+                "validation_errors": _redact_for_log(exc.errors()),
                 "method": request.method,
-                "url": str(request.url),
+                "url": _log_url(request),
+                "route": _log_route(request),
                 "exception_type": "RequestValidationError",
             },
         )
@@ -373,8 +425,11 @@ async def cerbos_unavailable_handler(request: Request, exc: CerbosUnavailableErr
                 "service_name": exc.service_name,
                 "exception_type": "CerbosUnavailableError",
                 "method": request.method,
-                "url": str(request.url),
-                "original_error": str(exc.original_error) if exc.original_error else None,
+                "url": _log_url(request),
+                "route": _log_route(request),
+                "original_error": (
+                    redact_cpf(str(exc.original_error)) if exc.original_error else None
+                ),
             },
         )
 
@@ -407,9 +462,10 @@ async def general_exception_handler(request: Request, exc: Exception):
             operation="general_exception",
             extra_fields={
                 "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
+                "exception_message": redact_cpf(str(exc)),
                 "method": request.method,
-                "url": str(request.url),
+                "url": _log_url(request),
+                "route": _log_route(request),
                 "has_traceback": True,
             },
         )
