@@ -14,12 +14,15 @@ from opentelemetry import trace
 
 from app.tracing import redact_cpf
 
-# The ``DETAIL`` of a PostgreSQL constraint error carries the offending key
-# value: ``Key (subject)=(<CPF>) already exists.`` or ``Key (user_id)=(5) is
-# not present in table "users".``. The value runs up to the ``)`` that closes the
-# group, followed by a space, a period or the end of the line.
+# The ``DETAIL`` line of a PostgreSQL constraint error carries the offending key
+# value: ``DETAIL:  Key (subject)=(<CPF>) already exists.`` or ``DETAIL:  Key
+# (user_id)=(5) is not present in table "users".``. The value runs up to the
+# last ``)`` of the line followed by a space, a period or the end of the line, so
+# a value that itself contains ``) `` is hidden whole. Anchored at the start of
+# a line so that each line is scanned at most once: logged text (a request URL,
+# a validation error) can be large and hostile, and the match must stay linear.
 _PG_KEY_VALUE_PATTERN = re.compile(
-    r"(Key \([^)]*\)=\().*?(\)(?=[\s.]|$))", re.MULTILINE
+    r"^([ \t]*DETAIL:[ \t]+Key \([^)\n]*\)=\().*(\)(?=[\s.]|$))", re.MULTILINE
 )
 KEY_VALUE_PLACEHOLDER = "[redacted]"
 

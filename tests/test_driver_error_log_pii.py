@@ -12,6 +12,7 @@ the key value.
 
 import json
 import logging
+import time
 from unittest.mock import MagicMock, patch
 
 import psycopg2.errors
@@ -241,8 +242,17 @@ def test_nested_extra_fields_are_masked(captured):
             f"DETAIL:  Key (name)=({KEY_VALUE_PLACEHOLDER}) already exists.",
         ),
         (
+            "DETAIL:  Key (name)=(foo) bar) already exists.",
+            f"DETAIL:  Key (name)=({KEY_VALUE_PLACEHOLDER}) already exists.",
+        ),
+        (
             "DETAIL:  Key (subject)=(abc)",
             f"DETAIL:  Key (subject)=({KEY_VALUE_PLACEHOLDER})",
+        ),
+        (
+            "first line\n  DETAIL:  Key (subject)=(abc) already exists.\nlast",
+            f"first line\n  DETAIL:  Key (subject)=({KEY_VALUE_PLACEHOLDER}) "
+            "already exists.\nlast",
         ),
         ("no key value here", "no key value here"),
     ],
@@ -256,3 +266,22 @@ def test_redact_log_value_keeps_non_string_values():
     assert redact_log_value(None) is None
     assert redact_log_value(True) is True
     assert redact_log_value({"cpf": CPF, "n": 1.5}) == {"cpf": "[cpf]", "n": 1.5}
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "Key (a)=(" * 20_000,
+        "DETAIL:  Key (a)=(" * 10_000,
+        "DETAIL:  Key (a)=(" + ")y" * 100_000,
+        "\nDETAIL:  Key (a)=(" * 10_000,
+        "DETAIL:  Key (" + "a" * 200_000,
+        "/api/v1/users/me?q=" + "Key%20(a)=(" * 20_000,
+    ],
+)
+def test_redact_log_value_stays_linear_on_hostile_input(hostile):
+    """Logged text (request URL, validation errors) is attacker-controlled: the
+    masking must not turn a large crafted value into seconds of CPU per line."""
+    started = time.perf_counter()
+    redact_log_value(hostile)
+    assert time.perf_counter() - started < 0.5
