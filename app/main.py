@@ -6,6 +6,7 @@ Implements OpenTelemetry tracing setup as specified in SPEC.md Section 6.
 import os
 import time
 from typing import Any
+from urllib.parse import unquote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, status
@@ -248,11 +249,20 @@ app.add_middleware(
 
 
 def _redact_for_log(value: Any) -> Any:
-    """Mask CPF-shaped strings anywhere in a value bound for the logs (DEV-542)."""
+    """Mask CPFs anywhere in a value bound for the logs (DEV-542).
+
+    Strings, dict keys and integers are checked: a CPF sent as a JSON number
+    (``{"subject": 98765432100}``) reaches the validation errors as an ``int``.
+    """
     if isinstance(value, dict):
-        return {key: _redact_for_log(item) for key, item in value.items()}
+        return {
+            _redact_for_log(key): _redact_for_log(item) for key, item in value.items()
+        }
     if isinstance(value, list | tuple):
         return [_redact_for_log(item) for item in value]
+    if isinstance(value, int) and not isinstance(value, bool):
+        masked = redact_cpf(str(value))
+        return value if masked == str(value) else masked
     return redact_cpf(value)
 
 
@@ -270,8 +280,8 @@ def _log_route(request: Request) -> str:
 
 
 def _log_url(request: Request) -> str:
-    """The full request URL (query string included) with CPFs masked."""
-    return redact_cpf(str(request.url))
+    """The full request URL (query string included, percent-decoded) with CPFs masked."""
+    return redact_cpf(unquote(str(request.url)))
 
 
 # Add request/response logging middleware

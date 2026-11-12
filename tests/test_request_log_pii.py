@@ -44,6 +44,7 @@ class _Capture(logging.Handler):
 
 class _Body(BaseModel):
     count: int
+    subject: str | None = None
 
 
 @pytest.fixture(scope="module")
@@ -177,6 +178,50 @@ def test_validation_error_input_and_url_are_masked(client, captured):
     fields = _exception_entry(captured, "validation_exception")
     assert fields["route"] == "/__test_dev_542/validation/{cpf}"
     assert fields["validation_errors"][0]["input"] == CPF_PLACEHOLDER
+
+
+def test_validation_error_masks_a_cpf_sent_as_number_or_as_key(client, captured):
+    response = client.post(
+        f"/__test_dev_542/validation/{CPF}",
+        json={"count": 1, "subject": int(CPF)},
+    )
+    numeric = client.post(f"/__test_dev_542/validation/{CPF}", json=int(CPF))
+    keyed = client.post(f"/__test_dev_542/validation/{CPF}", json={CPF: "x"})
+
+    assert response.status_code == numeric.status_code == keyed.status_code == 422
+    _assert_no_cpf(captured)
+    entries = [
+        e for e in captured.entries() if e.get("operation") == "validation_exception"
+    ]
+    assert len(entries) == 3
+    assert entries[0]["validation_errors"][0]["loc"] == ["body", "subject"]
+    assert entries[0]["validation_errors"][0]["input"] == CPF_PLACEHOLDER
+    assert entries[1]["validation_errors"][0]["input"] == CPF_PLACEHOLDER
+    assert entries[2]["validation_errors"][0]["input"] == {CPF_PLACEHOLDER: "x"}
+
+
+def test_masking_keeps_non_cpf_numbers_and_booleans(main):
+    redact = main._redact_for_log
+    assert redact({"count": 42, "ok": True, "id": 12345678901234}) == {
+        "count": 42,
+        "ok": True,
+        "id": 12345678901234,
+    }
+    assert redact({"subject": int(CPF)}) == {"subject": CPF_PLACEHOLDER}
+
+
+def test_percent_encoded_cpf_in_the_query_is_masked(client, captured):
+    response = client.get(
+        "/__test_dev_542/http/x?q=987%2E654%2E321-00&r=98765%34%332100"
+    )
+
+    assert response.status_code == 404
+    _assert_no_cpf(captured)
+    for line in captured.lines:
+        assert "987%2E654%2E321-00" not in line
+        assert "98765%34%332100" not in line
+    fields = _exception_entry(captured, "http_exception")
+    assert fields["url"].endswith(f"?q={CPF_PLACEHOLDER}&r={CPF_PLACEHOLDER}")
 
 
 def test_cerbos_unavailable_original_error_and_url_are_masked(client, captured):
