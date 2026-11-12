@@ -13,6 +13,7 @@ from opentelemetry import trace
 from app.exceptions import CerbosResponseError, CerbosUnavailableError
 from app.services.base import BaseService
 from app.settings import settings
+from app.tracing import redact_cpf, subject_kind
 
 
 class CerbosService(BaseService):
@@ -95,7 +96,7 @@ class CerbosService(BaseService):
             {
                 "cerbos.action": action,
                 "cerbos.resource_type": resource_type,
-                "cerbos.caller_subject": caller_subject,
+                "cerbos.caller": subject_kind(caller_subject),
                 "cerbos.caller_roles_count": len(caller_roles),
             },
         ) as span:
@@ -447,7 +448,6 @@ class CerbosService(BaseService):
         with self.trace_operation(
             "push_user_policy",
             {
-                "cerbos.user_subject": user_subject,
                 "cerbos.roles_count": len(user_roles),
                 "cerbos.operation": "push_policy",
             },
@@ -457,7 +457,7 @@ class CerbosService(BaseService):
                 policy_data = self.build_principal_policy(user_subject, user_roles)
                 policy_id = policy_data["metadata"]["storeIdentifier"]
 
-                span.set_attribute("cerbos.policy_id", policy_id)
+                span.set_attribute("cerbos.policy_id", redact_cpf(policy_id))
                 span.set_attribute("cerbos.user_roles", user_roles)
 
                 # Push policy with retry using correct Cerbos format
@@ -592,13 +592,13 @@ class CerbosService(BaseService):
         """Delete user policy from Cerbos Admin API."""
         with self.trace_operation(
             "delete_user_policy",
-            {"cerbos.user_subject": user_subject, "cerbos.operation": "delete_policy"},
+            {"cerbos.operation": "delete_policy"},
         ) as span:
             try:
                 policy_id = (
                     f"principal_{user_subject.replace(':', '_').replace('@', '_at_')}"
                 )
-                span.set_attribute("cerbos.policy_id", policy_id)
+                span.set_attribute("cerbos.policy_id", redact_cpf(policy_id))
 
                 # Delete policy with retry
                 def _make_delete_request():

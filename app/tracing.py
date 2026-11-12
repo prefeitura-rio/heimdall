@@ -3,6 +3,7 @@ OpenTelemetry tracing configuration for Heimdall Admin Service.
 Implements distributed tracing with gRPC OTLP exporter as specified in SPEC.md Section 6.
 """
 
+import re
 from typing import Any
 
 from opentelemetry import trace
@@ -112,10 +113,44 @@ def get_trace_context() -> dict[str, str]:
     return {"trace_id": "", "span_id": ""}
 
 
+# A CPF (the citizen's JWT ``subject``) as 11 bare digits or ``ddd.ddd.ddd-dd``.
+_CPF_PATTERN = re.compile(r"(?<!\d)(?:\d{3}\.\d{3}\.\d{3}-\d{2}|\d{11})(?!\d)")
+CPF_PLACEHOLDER = "[cpf]"
+
+
+def redact_cpf(value: Any) -> Any:
+    """Mask anything shaped like a CPF in a span attribute value.
+
+    Span attributes are exported over OTLP to the tracing backend, which must
+    never receive the citizen's CPF in clear (DEV-487). Strings (and sequences of
+    strings) are scrubbed; any other value is returned unchanged.
+    """
+    if isinstance(value, str):
+        return _CPF_PATTERN.sub(CPF_PLACEHOLDER, value)
+    if isinstance(value, list | tuple):
+        return [redact_cpf(item) for item in value]
+    return value
+
+
+def subject_kind(subject: str | None) -> str:
+    """Span-safe stand-in for a subject: never the subject itself.
+
+    System principals (``system:*``) are fixed service identities and are kept;
+    any other subject is a person (the CPF from ``preferred_username``) and is
+    reported only as ``"user"``. The person is identified in the trace by the
+    internal ``user.user_id`` instead.
+    """
+    if not subject:
+        return "none"
+    if subject.startswith("system:"):
+        return subject
+    return "user"
+
+
 def create_span(tracer, name: str, attributes: dict[str, Any] | None = None):
-    """Create a custom span with optional attributes."""
+    """Create a custom span with optional attributes (CPF-shaped values masked)."""
     span = tracer.start_span(name)
     if attributes:
         for key, value in attributes.items():
-            span.set_attribute(key, value)
+            span.set_attribute(key, redact_cpf(value))
     return span
