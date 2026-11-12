@@ -33,6 +33,9 @@ def create_database_engine() -> Engine:
         max_overflow=10,
         # Echo SQL queries in debug mode
         echo=settings.is_debug_mode(),
+        # Query parameters carry personal data (CPF, name, e-mail); keep them out
+        # of error messages, which reach logs and exported spans.
+        hide_parameters=True,
     )
 
     return engine
