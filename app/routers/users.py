@@ -321,9 +321,9 @@ Retrieve detailed information about a user by their CPF (Brazilian tax ID).
 which is extracted from the `preferred_username` field in Keycloak JWT tokens.
 
 **Authorization**: Any authenticated user can retrieve their own record. Reading
-another user's record requires the `user:read` permission (checked in Cerbos before
-the CPF is looked up, so a denied caller cannot tell whether it exists); superadmins
-have it. Callers without it get 403.
+another user's record exposes the same data as the user list, so it requires the same
+`user:list` permission (checked in Cerbos before the CPF is looked up, so a denied
+caller cannot tell whether it exists); superadmins have it. Callers without it get 403.
 
 **Auto-Creation**: Users are automatically created when they first authenticate with a valid JWT token.
 
@@ -363,7 +363,7 @@ roles inherited through group memberships.
             }
         },
         403: {
-            "description": "Forbidden - caller lacks the user:read permission",
+            "description": "Forbidden - caller lacks the user:list permission",
             "content": {
                 "application/json": {
                     "example": {"detail": "Permission denied to view this user"}
@@ -416,7 +416,11 @@ async def get_user_by_cpf(
     user_service: Annotated[UserService, Depends(lambda: UserService())],
     cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
 ):
-    # A caller may always read their own record; anyone else's needs user:read.
+    # A caller may always read their own record. Anyone else's record discloses
+    # the same data as the user list, so it needs the same user:list permission.
+    # Not user:read: that is a generic application action name that app roles
+    # carry, and principal policies grant role actions on every resource kind,
+    # so it would let non-admins read any user here.
     # Authorize before the lookup so a denied caller cannot probe which CPFs exist.
     # The requested CPF is personal data: keep it out of Cerbos and the audit.
     if cpf != current_user.subject:
@@ -424,7 +428,7 @@ async def get_user_by_cpf(
         can_read = cerbos_service.check_permission(
             caller_subject=current_user.subject,
             caller_roles=caller_roles,
-            action="user:read",
+            action="user:list",
             resource_type="user",
             resource_attrs={},
         )

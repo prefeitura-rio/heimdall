@@ -12,6 +12,7 @@ from app.dependencies import get_current_user
 from app.exceptions import CerbosUnavailableError
 from app.routers import users as users_router
 from app.routers.users import get_user_by_cpf, list_users
+from app.services.cerbos import CerbosService
 
 # Synthetic CPFs only (never real personal data in tests)
 CALLER_CPF = "11111111111"
@@ -164,7 +165,7 @@ def test_get_other_denied_caller_gets_identical_403_before_lookup(target_exists)
     cerbos_service.check_permission.assert_called_once_with(
         caller_subject=CALLER_CPF,
         caller_roles=["go:cursos:editor"],
-        action="user:read",
+        action="user:list",
         resource_type="user",
         resource_attrs={},
     )
@@ -275,3 +276,114 @@ def test_http_routes_enforce_authorization(client_factory, path, allowed, expect
     assert response.status_code == expected
     if expected == 403:
         assert OTHER_CPF not in response.text
+
+
+# Real principal policies ----------------------------------------------------
+# Heimdall grants every action of a caller's roles on every resource kind
+# (principal policy with resource "*"). Application roles carry generic action
+# names such as "user:read" (mapped to app routes), so the admin check on the
+# user resource must not use an action an app role can hold by accident.
+# Staging regression: the Editor — Cursos profile (app roles only) was denied
+# GET /users/ but could read any other user, superadmins included.
+
+
+def _policy_cerbos(role_actions):
+    """Cerbos double that decides from the principal policy Heimdall builds."""
+    from app.models import Action, Role
+
+    def _session():
+        session = MagicMock()
+
+        def _query(model):
+            query = MagicMock()
+            if model is Role:
+                def _role_filter(criterion):
+                    name = criterion.right.value
+                    role = MagicMock() if name in role_actions else None
+                    if role is not None:
+                        role.id = name
+                    result = MagicMock()
+                    result.first.return_value = role
+                    return result
+
+                query.filter.side_effect = _role_filter
+            elif model is Action:
+                def _action_filter(criterion):
+                    role_id = criterion.right.value
+                    actions = []
+                    for name in role_actions.get(role_id, []):
+                        action = MagicMock()
+                        action.name = name
+                        actions.append(action)
+                    result = MagicMock()
+                    result.all.return_value = actions
+                    return result
+
+                query.join.return_value.filter.side_effect = _action_filter
+            return query
+
+        session.query.side_effect = _query
+        return session
+
+    real = CerbosService.__new__(CerbosService)
+
+    def _check(caller_subject, caller_roles, action, resource_type, **_resource):
+        with patch("app.database.get_db_session", side_effect=_session):
+            policy = real.build_principal_policy(caller_subject, caller_roles)
+        effect = "EFFECT_DENY"
+        for rule in policy["principalPolicy"]["rules"]:
+            if rule["resource"] not in ("*", resource_type):
+                continue
+            for entry in rule["actions"]:
+                if entry["action"] in ("*", action):
+                    effect = entry["effect"]
+        return effect == "EFFECT_ALLOW"
+
+    cerbos_service = MagicMock()
+    cerbos_service.check_permission.side_effect = _check
+    return cerbos_service
+
+
+APP_ROLE_ACTIONS = {"go:cursos:editor": ["cursos:edit", "user:read"]}
+
+
+def test_app_role_with_generic_user_read_action_cannot_read_other_users():
+    target = _user(OTHER_CPF, 8, "Superadmin")
+    user_service = _user_service(target)
+    cerbos_service = _policy_cerbos(APP_ROLE_ACTIONS)
+
+    result, exc, _audit = _get(OTHER_CPF, user_service, cerbos_service)
+
+    assert result is None
+    assert exc.status_code == 403
+    user_service.get_user_by_subject.assert_not_called()
+
+
+def test_app_role_with_generic_user_read_action_cannot_list_users():
+    db = _db_with_users([_user(OTHER_CPF, 8)])
+    cerbos_service = _policy_cerbos(APP_ROLE_ACTIONS)
+
+    result, exc, _audit = _list(db, _user_service(), cerbos_service)
+
+    assert result is None
+    assert exc.status_code == 403
+    db.query.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("roles", "role_actions"),
+    [
+        (["superadmin"], {}),
+        (["user-admin"], {"user-admin": ["user:list"]}),
+    ],
+    ids=["superadmin", "role-with-user-list"],
+)
+def test_user_list_permission_reads_other_users(roles, role_actions):
+    user_service = _user_service(_user(OTHER_CPF, 8, "Other"))
+    user_service.get_user_roles.return_value = roles
+    cerbos_service = _policy_cerbos(role_actions)
+
+    result, exc, _audit = _get(OTHER_CPF, user_service, cerbos_service)
+
+    assert exc is None
+    assert result.cpf == OTHER_CPF
