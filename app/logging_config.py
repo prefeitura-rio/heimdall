@@ -5,11 +5,46 @@ Implements JSON structured logging with OpenTelemetry trace context.
 
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from typing import Any
 
 from opentelemetry import trace
+
+from app.tracing import redact_cpf
+
+# The ``DETAIL`` of a PostgreSQL constraint error carries the offending key
+# value: ``Key (subject)=(<CPF>) already exists.`` or ``Key (user_id)=(5) is
+# not present in table "users".``. The value runs up to the ``)`` that closes the
+# group, followed by a space, a period or the end of the line.
+_PG_KEY_VALUE_PATTERN = re.compile(
+    r"(Key \([^)]*\)=\().*?(\)(?=[\s.]|$))", re.MULTILINE
+)
+KEY_VALUE_PLACEHOLDER = "[redacted]"
+
+
+def redact_log_value(value: Any) -> Any:
+    """Mask personal data that error messages bring into a log entry (DEV-554).
+
+    Database driver messages reach the logs through ``str(e)`` and tracebacks
+    even with ``hide_parameters=True``: the PostgreSQL ``DETAIL`` line quotes the
+    key value that violated a constraint, which for ``users.subject`` is the
+    citizen's CPF. Strings get the key value hidden (only the column names stay)
+    and any CPF-shaped value masked; dicts, lists and tuples are walked; any other
+    value is returned unchanged.
+    """
+    if isinstance(value, str):
+        return redact_cpf(
+            _PG_KEY_VALUE_PATTERN.sub(rf"\g<1>{KEY_VALUE_PLACEHOLDER}\g<2>", value)
+        )
+    if isinstance(value, dict):
+        return {
+            redact_log_value(key): redact_log_value(item) for key, item in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [redact_log_value(item) for item in value]
+    return value
 
 
 class StructuredFormatter(logging.Formatter):
@@ -33,7 +68,7 @@ class StructuredFormatter(logging.Formatter):
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": redact_log_value(record.getMessage()),
             "service": self.service_name,
         }
 
@@ -49,14 +84,18 @@ class StructuredFormatter(logging.Formatter):
 
         # Add extra fields from record
         if hasattr(record, "extra_fields"):
-            log_entry.update(record.extra_fields)
+            log_entry.update(redact_log_value(record.extra_fields))
 
-        # Add exception info if present
+        # Add exception info if present (driver messages quote key values: DEV-554)
         if record.exc_info:
             log_entry["exception"] = {
                 "type": record.exc_info[0].__name__ if record.exc_info[0] else None,
-                "message": str(record.exc_info[1]) if record.exc_info[1] else None,
-                "traceback": self.formatException(record.exc_info),
+                "message": (
+                    redact_log_value(str(record.exc_info[1]))
+                    if record.exc_info[1]
+                    else None
+                ),
+                "traceback": redact_log_value(self.formatException(record.exc_info)),
             }
 
         # Add operation context if available
