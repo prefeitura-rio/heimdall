@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.common.authz import forbidden
 from app.database import get_db
 from app.dependencies import get_api_user, get_current_user
+from app.exceptions import MappingAlreadyExistsError
 from app.models import User
 from app.services.cerbos import CerbosService
 from app.services.mapping import MappingService
@@ -326,11 +327,11 @@ actions API to create actions first.
             }
         },
         400: {
-            "description": "Bad request - Invalid action ID",
+            "description": "Bad request - Action ID does not exist or invalid path pattern",
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Action with ID 999 does not exist"
+                        "detail": "Action with ID 999 not found"
                     }
                 }
             }
@@ -433,8 +434,12 @@ async def create_mapping(
             description=mapping_data.description,
             created_by=current_user,
         )
-    except ValueError as e:
+    except MappingAlreadyExistsError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValueError as e:
+        # Invalid input: a missing action (ActionNotFoundError) or a path
+        # pattern that cannot be used. Only the duplicate is a conflict.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return MappingDetailResponse(
         id=mapping.id,
