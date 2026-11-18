@@ -41,6 +41,13 @@ CPF_BARE_SUBJECT = "98765432100"
 SYSTEM_SUBJECT = "system:background_tasks"
 
 PERSON_SUBJECTS = [EMAIL_SUBJECT, CPF_DASHED_SUBJECT, CPF_BARE_SUBJECT]
+# A token can carry any preferred_username, including one shaped like a
+# service principal that Heimdall does not act as (DEV-625).
+FAKE_SYSTEM_SUBJECTS = [
+    "system:unknown_service",
+    f"system:{EMAIL_SUBJECT}",
+    f"system:{CPF_DASHED_SUBJECT}",
+]
 
 
 @pytest.fixture
@@ -218,6 +225,19 @@ def test_actor_attribute_keeps_the_system_principal(exporter, flow):
     _, _, key, _ = flow
     assert attributes[key] == SYSTEM_SUBJECT
     assert attributes[f"{key}_user_id"] == USER_ID
+
+
+@pytest.mark.parametrize("subject", FAKE_SYSTEM_SUBJECTS)
+@pytest.mark.parametrize("flow", FLOWS, ids=FLOW_IDS)
+def test_actor_attribute_does_not_export_an_unknown_system_subject(
+    exporter, flow, subject
+):
+    attributes = _run(exporter, flow, subject)
+
+    _, _, key, _ = flow
+    assert attributes[key] == "user"
+    assert attributes[f"{key}_user_id"] == USER_ID
+    _assert_subject_not_exported(exporter, subject)
 
 
 def test_update_action_without_actor_reports_none(exporter):

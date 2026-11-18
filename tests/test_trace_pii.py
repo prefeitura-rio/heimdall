@@ -10,7 +10,9 @@ request path recorded by the FastAPI instrumentation, error messages, exception
 events and the status description.
 """
 
+import re
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,6 +37,7 @@ from app.services.membership import MembershipService
 from app.services.user import UserService
 from app.tracing import (
     CPF_PLACEHOLDER,
+    KNOWN_SYSTEM_PRINCIPALS,
     CpfRedactingSpanExporter,
     create_span,
     redact_cpf,
@@ -132,6 +135,42 @@ def test_subject_kind_never_returns_a_person_subject():
     assert subject_kind("system:background_tasks") == "system:background_tasks"
     assert subject_kind(None) == "none"
     assert subject_kind("") == "none"
+
+
+@pytest.mark.parametrize("principal", ["system:api_client", "system:background_tasks"])
+def test_subject_kind_keeps_the_known_service_principals(principal):
+    assert principal in KNOWN_SYSTEM_PRINCIPALS
+    assert subject_kind(principal) == principal
+
+
+# Subjects that only look like a service principal: the JWT preferred_username
+# is chosen by whoever holds the token (DEV-625).
+FAKE_SYSTEM_SUBJECTS = [
+    "system:",
+    "system:unknown_service",
+    f"system:{CPF}",
+    f"system:{CPF_FORMATTED}",
+    "system:fulana.de.tal@example.test",
+    "system:api_client:fulana",
+    "system:api_client ",
+    "System:api_client",
+]
+
+
+@pytest.mark.parametrize("subject", FAKE_SYSTEM_SUBJECTS)
+def test_subject_kind_reports_unknown_system_subjects_as_user(subject):
+    assert subject_kind(subject) == "user"
+
+
+def test_every_system_principal_used_in_the_code_is_known():
+    app_dir = Path(__file__).resolve().parent.parent / "app"
+    used = {
+        match
+        for path in app_dir.rglob("*.py")
+        for match in re.findall(r"[\"'](system:[^\"']*)[\"']", path.read_text())
+    }
+    assert used, "expected the code to act as at least one service principal"
+    assert used <= KNOWN_SYSTEM_PRINCIPALS
 
 
 def test_create_span_masks_cpf_in_attribute_values(exporter, traced):
@@ -515,6 +554,69 @@ def test_audit_keeps_system_actor_in_span(exporter, traced):
         _attribute(exporter, "audit.log_operation", "audit.actor")
         == "system:background_tasks"
     )
+
+
+def _assert_subject_not_exported(exporter, subject: str) -> None:
+    for span_name, key, value in _attributes(exporter):
+        assert subject not in str(value), (
+            f"subject leaked into span {span_name!r} attribute {key!r}"
+        )
+
+
+@pytest.mark.parametrize("subject", FAKE_SYSTEM_SUBJECTS[1:])
+def test_audit_does_not_export_an_unknown_system_subject(exporter, traced, subject):
+    audit = traced(AuditService())
+    audit.log_operation(
+        db=MagicMock(),
+        actor_subject=subject,
+        operation="add_member",
+        actor_user_id=USER_ID,
+    )
+
+    assert _attribute(exporter, "audit.log_operation", "audit.actor") == "user"
+    _assert_subject_not_exported(exporter, subject)
+
+
+@pytest.mark.parametrize("subject", FAKE_SYSTEM_SUBJECTS[1:])
+def test_cerbos_does_not_export_an_unknown_system_caller(
+    exporter, traced, cerbos, subject
+):
+    traced(cerbos)
+    response = MagicMock(status_code=200)
+    response.json.return_value = {
+        "results": [{"actions": {"group:add_member": "EFFECT_DENY"}}]
+    }
+    with (
+        patch(
+            "app.services.health_monitor.HealthMonitor.is_cerbos_available",
+            return_value=True,
+        ),
+        patch("app.services.cerbos.requests.post", return_value=response),
+    ):
+        cerbos.check_permission(
+            caller_subject=subject,
+            caller_roles=["viewer"],
+            action="group:add_member",
+            resource_type="group",
+            resource_attrs={"name": "ops"},
+        )
+
+    assert _attribute(exporter, "cerbos.check_permission", "cerbos.caller") == "user"
+    _assert_subject_not_exported(exporter, subject)
+
+
+@pytest.mark.parametrize("subject", FAKE_SYSTEM_SUBJECTS[1:])
+def test_membership_does_not_export_an_unknown_system_caller(
+    exporter, traced, memberships, subject
+):
+    traced(memberships)
+    memberships.add_member_to_group(MagicMock(), "ops", "member-x", subject, [])
+
+    assert (
+        _attribute(exporter, "membership.add_member_to_group", "membership.caller")
+        == "user"
+    )
+    _assert_subject_not_exported(exporter, subject)
 
 
 # --- exporter: request spans, errors and exception events --------------------
