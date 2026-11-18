@@ -12,6 +12,7 @@ from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
+from app.tracing import subject_kind
 
 
 class RoleService(BaseService):
@@ -34,7 +35,8 @@ class RoleService(BaseService):
             "create_role",
             {
                 "role.name": name,
-                "role.created_by": created_by.subject,
+                "role.created_by": subject_kind(created_by.subject),
+                "role.created_by_user_id": created_by.id,
                 "role.operation": "create",
             },
         ) as span:
@@ -181,7 +183,8 @@ class RoleService(BaseService):
             {
                 "role.group_name": group_name,
                 "role.role_name": role_name,
-                "role.assigned_by": assigned_by.subject,
+                "role.assigned_by": subject_kind(assigned_by.subject),
+                "role.assigned_by_user_id": assigned_by.id,
                 "role.operation": "assign_to_group",
             },
         ) as span:
@@ -283,7 +286,8 @@ class RoleService(BaseService):
             {
                 "role.group_name": group_name,
                 "role.role_name": role_name,
-                "role.removed_by": removed_by.subject,
+                "role.removed_by": subject_kind(removed_by.subject),
+                "role.removed_by_user_id": removed_by.id,
                 "role.operation": "remove_from_group",
             },
         ) as span:
@@ -573,7 +577,8 @@ class RoleService(BaseService):
             {
                 "role_name": role_name,
                 "action_name": action_name,
-                "assigned_by": assigned_by.subject,
+                "assigned_by": subject_kind(assigned_by.subject),
+                "assigned_by_user_id": assigned_by.id,
             },
         ) as span:
             try:
@@ -669,7 +674,8 @@ class RoleService(BaseService):
             {
                 "role_name": role_name,
                 "action_name": action_name,
-                "removed_by": removed_by.subject,
+                "removed_by": subject_kind(removed_by.subject),
+                "removed_by_user_id": removed_by.id,
             },
         ) as span:
             try:

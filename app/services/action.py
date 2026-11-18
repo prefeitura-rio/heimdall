@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import Action, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
+from app.tracing import subject_kind
 
 
 class ActionService(BaseService):
@@ -29,7 +30,8 @@ class ActionService(BaseService):
             "create_action",
             {
                 "action.name": name,
-                "action.created_by": created_by.subject,
+                "action.created_by": subject_kind(created_by.subject),
+                "action.created_by_user_id": created_by.id,
                 "action.operation": "create",
             },
         ) as span:
@@ -132,7 +134,10 @@ class ActionService(BaseService):
             {
                 "action.id": action_id,
                 "action.operation": "update",
-                "action.updated_by": updated_by.subject if updated_by else None,
+                "action.updated_by": subject_kind(
+                    updated_by.subject if updated_by else None
+                ),
+                "action.updated_by_user_id": updated_by.id if updated_by else None,
             },
         ) as span:
             try:
@@ -220,7 +225,8 @@ class ActionService(BaseService):
             {
                 "action.id": action_id,
                 "action.operation": "delete",
-                "action.deleted_by": deleted_by.subject,
+                "action.deleted_by": subject_kind(deleted_by.subject),
+                "action.deleted_by_user_id": deleted_by.id,
             },
         ) as span:
             try:

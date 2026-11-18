@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import Group, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
+from app.tracing import subject_kind
 
 
 class GroupService(BaseService):
@@ -29,7 +30,8 @@ class GroupService(BaseService):
             "create_group",
             {
                 "group.name": name,
-                "group.created_by": created_by.subject,
+                "group.created_by": subject_kind(created_by.subject),
+                "group.created_by_user_id": created_by.id,
                 "group.operation": "create",
             },
         ) as span:
@@ -123,7 +125,8 @@ class GroupService(BaseService):
             "delete_group",
             {
                 "group.name": group_name,
-                "group.deleted_by": deleted_by.subject,
+                "group.deleted_by": subject_kind(deleted_by.subject),
+                "group.deleted_by_user_id": deleted_by.id,
                 "group.operation": "delete",
             },
         ) as span:
