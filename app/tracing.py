@@ -140,17 +140,24 @@ def redact_cpf(value: Any) -> Any:
     return value
 
 
+# The service principals Heimdall itself acts as: the static API token
+# (``app/dependencies.py``) and the background reconciler
+# (``app/background_tasks.py``). Only these are fixed identities safe to export.
+KNOWN_SYSTEM_PRINCIPALS = frozenset({"system:api_client", "system:background_tasks"})
+
+
 def subject_kind(subject: str | None) -> str:
     """Span-safe stand-in for a subject: never the subject itself.
 
-    System principals (``system:*``) are fixed service identities and are kept;
-    any other subject is a person (the CPF from ``preferred_username``) and is
-    reported only as ``"user"``. The person is identified in the trace by the
-    internal ``user.user_id`` instead.
+    The known service principals (``KNOWN_SYSTEM_PRINCIPALS``) are fixed
+    identities and are kept; any other subject is reported only as ``"user"``,
+    including one that merely starts with ``system:`` (the subject comes from
+    the JWT ``preferred_username``, which the caller controls, DEV-625). The
+    person is identified in the trace by the internal ``user.user_id`` instead.
     """
     if not subject:
         return "none"
-    if subject.startswith("system:"):
+    if subject in KNOWN_SYSTEM_PRINCIPALS:
         return subject
     return "user"
 
