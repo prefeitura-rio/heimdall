@@ -104,31 +104,25 @@ class StructuredFormatter(logging.Formatter):
                 "traceback": redact_log_value(self.formatException(record.exc_info)),
             }
 
-        # Add operation context if available
-        if hasattr(record, "operation"):
-            log_entry["operation"] = record.operation
-
-        if hasattr(record, "actor_subject"):
-            log_entry["actor_subject"] = record.actor_subject
-
-        if hasattr(record, "target"):
-            log_entry["target"] = record.target
-
-        if hasattr(record, "request_id"):
-            log_entry["request_id"] = record.request_id
-
-        if hasattr(record, "user_id"):
-            log_entry["user_id"] = record.user_id
+        # Add operation context if available. These fields come from the
+        # ``extra=`` of the stdlib ``logging`` call, outside ``extra_fields``, and
+        # ``actor_subject`` is the citizen's CPF on every JWT-authenticated
+        # request: they get the same masking as the message (DEV-636).
+        for field in ("operation", "actor_subject", "target", "request_id", "user_id"):
+            if hasattr(record, field):
+                log_entry[field] = redact_log_value(getattr(record, field))
 
         # Add HTTP context if available
         if hasattr(record, "http_method"):
-            log_entry["http"] = {
-                "method": record.http_method,
-                "path": getattr(record, "http_path", None),
-                "status_code": getattr(record, "http_status_code", None),
-                "duration_ms": getattr(record, "http_duration_ms", None),
-                "user_agent": getattr(record, "http_user_agent", None),
-            }
+            log_entry["http"] = redact_log_value(
+                {
+                    "method": record.http_method,
+                    "path": getattr(record, "http_path", None),
+                    "status_code": getattr(record, "http_status_code", None),
+                    "duration_ms": getattr(record, "http_duration_ms", None),
+                    "user_agent": getattr(record, "http_user_agent", None),
+                }
+            )
 
         # Add database context if available
         if hasattr(record, "db_query_type"):
@@ -140,13 +134,15 @@ class StructuredFormatter(logging.Formatter):
 
         # Add Cerbos context if available
         if hasattr(record, "cerbos_operation"):
-            log_entry["cerbos"] = {
-                "operation": record.cerbos_operation,
-                "response_status": getattr(record, "cerbos_response_status", None),
-                "duration_ms": getattr(record, "cerbos_duration_ms", None),
-                "action": getattr(record, "cerbos_action", None),
-                "resource_type": getattr(record, "cerbos_resource_type", None),
-            }
+            log_entry["cerbos"] = redact_log_value(
+                {
+                    "operation": record.cerbos_operation,
+                    "response_status": getattr(record, "cerbos_response_status", None),
+                    "duration_ms": getattr(record, "cerbos_duration_ms", None),
+                    "action": getattr(record, "cerbos_action", None),
+                    "resource_type": getattr(record, "cerbos_resource_type", None),
+                }
+            )
 
         return json.dumps(log_entry, ensure_ascii=False)
 
