@@ -14,11 +14,19 @@ from app.common.authz import forbidden
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.logging_config import get_structured_logger
 from app.models import Membership, User
 from app.services.cerbos import CerbosService
 from app.services.user import UserService
 
 router = APIRouter()
+
+logger = get_structured_logger(__name__)
+
+# Fixed 500 details: the error itself (driver message, SQL, key values) goes to
+# the masked log only, never to the response (DEV-560).
+LIST_USERS_FAILED_DETAIL = "Failed to list users"
+USER_INFO_FAILED_DETAIL = "Failed to retrieve user information"
 
 
 # Pydantic models for request/response
@@ -210,11 +218,14 @@ async def list_users(
             limit=limit
         )
 
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to list users", extra={"operation": "list_users"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list users: {str(e)}"
-        )
+            detail=LIST_USERS_FAILED_DETAIL,
+        ) from None
 
 
 @router.get(
@@ -274,7 +285,7 @@ roles inherited through group memberships.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to retrieve user information: Database connection error"
+                        "detail": "Failed to retrieve user information"
                     }
                 }
             }
@@ -303,11 +314,15 @@ async def get_current_user_info(
             roles=user_roles,
         )
 
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to retrieve user information",
+            extra={"operation": "get_current_user_info"},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve user information: {str(e)}"
-        )
+            detail=USER_INFO_FAILED_DETAIL,
+        ) from None
 
 
 @router.get(
