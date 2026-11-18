@@ -711,9 +711,7 @@ async def list_role_actions(
 
     # Check if role exists
     try:
-        roles, _ = role_service.list_roles(db)
-        role_exists = any(role.name == role_name for role in roles)
-        if not role_exists:
+        if role_service.get_role_by_name(db, role_name) is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Role '{role_name}' not found",
@@ -869,9 +867,7 @@ async def assign_action_to_role(
 
     try:
         # Verify role exists
-        roles, _ = role_service.list_roles(db)
-        role_exists = any(role.name == role_name for role in roles)
-        if not role_exists:
+        if role_service.get_role_by_name(db, role_name) is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Role '{role_name}' not found",
@@ -1037,9 +1033,7 @@ async def remove_action_from_role(
 
     try:
         # Verify role exists
-        roles, _ = role_service.list_roles(db)
-        role_exists = any(role.name == role_name for role in roles)
-        if not role_exists:
+        if role_service.get_role_by_name(db, role_name) is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Role '{role_name}' not found",
