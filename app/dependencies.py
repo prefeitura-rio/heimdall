@@ -21,6 +21,11 @@ security = HTTPBearer()
 # Get structured logger
 logger = get_structured_logger(__name__)
 
+# Fixed 500 details: the driver message (SQL, constraint, the CPF in the key
+# value) stays in the masked log only, never in the response (DEV-560).
+USER_CREATION_FAILED_DETAIL = "User creation failed"
+USER_AUTHENTICATION_FAILED_DETAIL = "User authentication failed"
+
 
 def get_auth_service() -> AuthService:
     """Get authentication service instance."""
@@ -95,8 +100,8 @@ def get_current_user(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"User creation failed: {str(e)}",
-        )
+            detail=USER_CREATION_FAILED_DETAIL,
+        ) from None
 
 
 def get_api_user(
@@ -172,8 +177,8 @@ def get_api_user(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"User authentication failed: {str(e)}",
-        )
+            detail=USER_AUTHENTICATION_FAILED_DETAIL,
+        ) from None
 
 
 def get_current_user_with_roles(
