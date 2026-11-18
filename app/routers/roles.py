@@ -14,6 +14,7 @@ from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.exceptions import GroupNotFoundError
+from app.logging_config import get_structured_logger
 from app.models import User
 from app.services.action import ActionService
 from app.services.cerbos import CerbosService
@@ -21,6 +22,15 @@ from app.services.role import RoleService
 from app.services.user import UserService
 
 router = APIRouter()
+
+logger = get_structured_logger(__name__)
+
+# Fixed 500 details: the error itself (driver message, SQL, constraint, key
+# values) goes to the masked log only, never to the response (DEV-626).
+LIST_ROLE_ACTIONS_FAILED_DETAIL = "Failed to retrieve role actions"
+ASSIGN_ROLE_ACTION_FAILED_DETAIL = "Failed to assign action to role"
+REMOVE_ROLE_ACTION_FAILED_DETAIL = "Failed to remove action from role"
+DELETE_ROLE_FAILED_DETAIL = "Failed to delete role"
 
 
 # Import ActionResponse from actions router
@@ -669,7 +679,7 @@ Permissions are checked via Cerbos policies.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to retrieve role actions: Policy service error"
+                        "detail": "Failed to retrieve role actions"
                     }
                 }
             },
@@ -731,11 +741,14 @@ async def list_role_actions(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to retrieve role actions", extra={"operation": "list_role_actions"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve role actions: {str(e)}",
-        )
+            detail=LIST_ROLE_ACTIONS_FAILED_DETAIL,
+        ) from None
 
 
 @router.post(
@@ -812,7 +825,7 @@ Permissions are checked via Cerbos policies.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to assign action to role: Policy service error"
+                        "detail": "Failed to assign action to role"
                     }
                 }
             },
@@ -906,11 +919,15 @@ async def assign_action_to_role(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to assign action to role",
+            extra={"operation": "assign_action_to_role"},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to assign action to role: {str(e)}",
-        )
+            detail=ASSIGN_ROLE_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.delete(
@@ -978,7 +995,7 @@ Permissions are checked via Cerbos policies.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to remove action from role: Policy service error"
+                        "detail": "Failed to remove action from role"
                     }
                 }
             },
@@ -1067,11 +1084,15 @@ async def remove_action_from_role(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to remove action from role",
+            extra={"operation": "remove_action_from_role"},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to remove action from role: {str(e)}",
-        )
+            detail=REMOVE_ROLE_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.delete(
@@ -1132,7 +1153,7 @@ Permissions are checked via Cerbos policies.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to delete role: Database transaction error"
+                        "detail": "Failed to delete role"
                     }
                 }
             },
@@ -1214,8 +1235,11 @@ async def delete_role(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to delete role", extra={"operation": "delete_role"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete role: {str(e)}",
-        )
+            detail=DELETE_ROLE_FAILED_DETAIL,
+        ) from None
