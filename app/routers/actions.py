@@ -12,12 +12,23 @@ from sqlalchemy.orm import Session
 from app.common.authz import forbidden
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.logging_config import get_structured_logger
 from app.models import User
 from app.services.action import ActionService
 from app.services.cerbos import CerbosService
 from app.services.user import UserService
 
 router = APIRouter()
+
+logger = get_structured_logger(__name__)
+
+# Fixed 500 details: the error itself (driver message, SQL, constraint, key
+# values) goes to the masked log only, never to the response (DEV-626).
+CREATE_ACTION_FAILED_DETAIL = "Failed to create action"
+LIST_ACTIONS_FAILED_DETAIL = "Failed to list actions"
+GET_ACTION_FAILED_DETAIL = "Failed to get action"
+UPDATE_ACTION_FAILED_DETAIL = "Failed to update action"
+DELETE_ACTION_FAILED_DETAIL = "Failed to delete action"
 
 
 # Pydantic models for request/response
@@ -264,7 +275,7 @@ Create a new action that can be used in authorization policies and endpoint mapp
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to create action: Database connection error"
+                        "detail": "Failed to create action"
                     }
                 }
             }
@@ -324,11 +335,14 @@ async def create_action(
         raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to create action", extra={"operation": "create_action"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create action: {str(e)}",
-        )
+            detail=CREATE_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.get(
@@ -412,7 +426,7 @@ number of API endpoints currently mapped to it.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to list actions: Database connection error"
+                        "detail": "Failed to list actions"
                     }
                 }
             }
@@ -450,11 +464,14 @@ async def list_actions(
             limit=limit,
         )
 
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to list actions", extra={"operation": "list_actions"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list actions: {str(e)}",
-        )
+            detail=LIST_ACTIONS_FAILED_DETAIL,
+        ) from None
 
 
 @router.get(
@@ -514,7 +531,7 @@ API endpoints currently mapped to this action.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to get action: Database connection error"
+                        "detail": "Failed to get action"
                     }
                 }
             }
@@ -545,11 +562,14 @@ async def get_action(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to get action", extra={"operation": "get_action"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get action: {str(e)}",
-        )
+            detail=GET_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.put(
@@ -631,7 +651,7 @@ authorization policies that reference this action.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to update action: Database connection error"
+                        "detail": "Failed to update action"
                     }
                 }
             }
@@ -692,11 +712,14 @@ async def update_action(
         raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to update action", extra={"operation": "update_action"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update action: {str(e)}",
-        )
+            detail=UPDATE_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.delete(
@@ -771,7 +794,7 @@ needed before deletion.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to delete action: Database connection error"
+                        "detail": "Failed to delete action"
                     }
                 }
             }
@@ -823,8 +846,11 @@ async def delete_action(
         raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to delete action", extra={"operation": "delete_action"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete action: {str(e)}",
-        )
+            detail=DELETE_ACTION_FAILED_DETAIL,
+        ) from None
