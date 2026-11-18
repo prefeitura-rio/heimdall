@@ -16,6 +16,7 @@ from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
 from app.services.redis_mapping import RedisMappingService
+from app.tracing import subject_kind
 
 # A path segment that starts with ":name" (optionally right after a leading "^").
 _NAMED_PARAM_SEGMENT = re.compile(r"(?:^\^?|/):[A-Za-z_]")
@@ -152,7 +153,8 @@ class MappingService(BaseService):
                 "mapping.path_pattern": path_pattern,
                 "mapping.method": method,
                 "mapping.action_id": action_id,
-                "mapping.created_by": created_by.subject,
+                "mapping.created_by": subject_kind(created_by.subject),
+                "mapping.created_by_user_id": created_by.id,
                 "mapping.operation": "create",
             },
         ) as span:
@@ -304,7 +306,8 @@ class MappingService(BaseService):
             "update_mapping",
             {
                 "mapping.id": mapping_id,
-                "mapping.updated_by": updated_by.subject,
+                "mapping.updated_by": subject_kind(updated_by.subject),
+                "mapping.updated_by_user_id": updated_by.id,
                 "mapping.operation": "update",
             },
         ) as span:
@@ -449,7 +452,8 @@ class MappingService(BaseService):
             "delete_mapping",
             {
                 "mapping.id": mapping_id,
-                "mapping.deleted_by": deleted_by.subject,
+                "mapping.deleted_by": subject_kind(deleted_by.subject),
+                "mapping.deleted_by_user_id": deleted_by.id,
                 "mapping.operation": "delete",
             },
         ) as span:

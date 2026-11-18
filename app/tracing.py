@@ -118,8 +118,11 @@ def get_trace_context() -> dict[str, str]:
     return {"trace_id": "", "span_id": ""}
 
 
-# A CPF (the citizen's JWT ``subject``) as 11 bare digits or ``ddd.ddd.ddd-dd``.
-_CPF_PATTERN = re.compile(r"(?<!\d)(?:\d{3}\.\d{3}\.\d{3}-\d{2}|\d{11})(?!\d)")
+# A CPF (the citizen's JWT ``subject``) as 11 bare digits, ``ddd.ddd.ddd-dd`` or
+# ``ddddddddd-dd``.
+_CPF_PATTERN = re.compile(
+    r"(?<!\d)(?:\d{3}\.\d{3}\.\d{3}-\d{2}|\d{9}-\d{2}|\d{11})(?!\d)"
+)
 CPF_PLACEHOLDER = "[cpf]"
 
 
