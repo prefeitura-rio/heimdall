@@ -478,10 +478,11 @@ class RoleService(BaseService):
                 span.set_attribute("operation.error", str(e))
                 raise
 
-    def delete_role(self, db: Session, role_name: str) -> bool:
+    def delete_role(self, db: Session, role_name: str, deleted_by: User) -> bool:
         """
         Delete a role from the system.
         Also removes the role from all groups and user assignments.
+        The deletion is audited with deleted_by as the actor.
         """
         with self.trace_operation("delete_role", {"role_name": role_name}) as span:
             try:
@@ -510,12 +511,13 @@ class RoleService(BaseService):
                     db=db,
                     operation="delete",
                     role_name=role_name,
-                    actor_subject="system",  # Will be updated with actual user in future
+                    actor_subject=deleted_by.subject,
                     result={
                         "role_id": role.id,
                         "group_roles_removed": group_roles_count
                     },
-                    success=True
+                    success=True,
+                    actor_user_id=deleted_by.id,
                 )
 
                 return True
