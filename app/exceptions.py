@@ -48,3 +48,28 @@ class GroupNotFoundError(Exception):
     def __init__(self, group_name: str):
         self.group_name = group_name
         super().__init__(f"Group '{group_name}' not found")
+
+
+class ActionNotFoundError(ValueError):
+    """
+    Exception raised when a mapping references an action that does not exist.
+    Should result in HTTP 400 Bad Request response on mapping creation.
+    """
+
+    def __init__(self, action_id: int):
+        self.action_id = action_id
+        super().__init__(f"Action with ID {action_id} not found")
+
+
+class MappingAlreadyExistsError(ValueError):
+    """
+    Exception raised when a mapping already exists for the same path pattern
+    and method. Should result in HTTP 409 Conflict response.
+    """
+
+    def __init__(self, path_pattern: str, method: str):
+        self.path_pattern = path_pattern
+        self.method = method
+        super().__init__(
+            f"Mapping for pattern '{path_pattern}' and method '{method}' already exists"
+        )

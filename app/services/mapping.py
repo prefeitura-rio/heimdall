@@ -10,6 +10,7 @@ from opentelemetry import trace
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.exceptions import ActionNotFoundError, MappingAlreadyExistsError
 from app.models import Action, Endpoint, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
@@ -175,7 +176,7 @@ class MappingService(BaseService):
                 action = db.query(Action).filter(Action.id == action_id).first()
                 if not action:
                     span.set_attribute("mapping.action_not_found", True)
-                    raise ValueError(f"Action with ID {action_id} not found")
+                    raise ActionNotFoundError(action_id)
 
                 span.set_attribute("mapping.action_name", action.name)
 
@@ -190,9 +191,7 @@ class MappingService(BaseService):
 
                 if existing:
                     span.set_attribute("mapping.already_exists", True)
-                    raise ValueError(
-                        f"Mapping for pattern '{path_pattern}' and method '{method}' already exists"
-                    )
+                    raise MappingAlreadyExistsError(path_pattern, method)
 
                 # Create the endpoint mapping
                 endpoint = Endpoint(
