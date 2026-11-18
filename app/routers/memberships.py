@@ -258,26 +258,20 @@ which serves as the unique subject identifier.
 
 **Role Inheritance**: Users automatically inherit all roles assigned to groups
 they're members of.
+
+**Idempotency**: Adding a user who is already a member of the group is not an
+error: the call returns 200 with `member_added` and the existing membership is
+kept unchanged.
     """,
     responses={
         200: {
-            "description": "Member added to group successfully",
+            "description": "Member added to group successfully, or already a member (idempotent)",
             "content": {
                 "application/json": {
                     "example": {
                         "status": "member_added",
                         "group": "engineering_team:backend",
                         "subject": "12345678901"
-                    }
-                }
-            }
-        },
-        400: {
-            "description": "Bad request - Invalid CPF format or user already in group",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "User is already a member of this group"
                     }
                 }
             }
@@ -409,20 +403,13 @@ they inherited through that group membership.
 
 **Cache Invalidation**: User role caches are automatically invalidated to ensure
 immediate effect of permission changes.
+
+**Idempotency**: Removing a user who is not (or is no longer) a member of the
+group is not an error: the call returns 204 and nothing changes.
     """,
     responses={
         204: {
-            "description": "Member removed from group successfully"
-        },
-        400: {
-            "description": "Bad request - User not a member of the group",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "User is not a member of this group"
-                    }
-                }
-            }
+            "description": "Member removed from group successfully, or was not a member (idempotent)"
         },
         401: {
             "description": "Unauthorized - Invalid or missing JWT token",
