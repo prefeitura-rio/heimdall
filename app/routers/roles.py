@@ -1209,7 +1209,7 @@ async def delete_role(
             )
 
         # Delete the role
-        role_service.delete_role(db, role_name)
+        role_service.delete_role(db, role_name, deleted_by=current_user)
 
         # Invalidate policy version to trigger near real-time sync
         from app.services.policy_invalidator import invalidate_policy_version
