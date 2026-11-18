@@ -26,6 +26,9 @@ _PG_KEY_VALUE_PATTERN = re.compile(
 )
 KEY_VALUE_PLACEHOLDER = "[redacted]"
 
+# Loggers uvicorn configures with handlers of its own (``uvicorn.config.LOGGING_CONFIG``).
+UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.asgi")
+
 
 def redact_log_value(value: Any) -> Any:
     """Mask personal data that error messages bring into a log entry (DEV-554).
@@ -307,6 +310,16 @@ def setup_structured_logging() -> None:
 
     # Silence health check logs in production
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+    # uvicorn configures its loggers (own stderr handlers, propagate=False) before
+    # it imports the app, so their records skipped this formatter and its masking:
+    # the "Exception in ASGI application" traceback of a 500 carried the CPF of the
+    # exception message in clear (DEV-553). Route them to the structured handler.
+    for name in UVICORN_LOGGERS:
+        uvicorn_logger = logging.getLogger(name)
+        for handler in uvicorn_logger.handlers[:]:
+            uvicorn_logger.removeHandler(handler)
+        uvicorn_logger.propagate = True
 
 
 def get_structured_logger(name: str) -> StructuredLogger:
