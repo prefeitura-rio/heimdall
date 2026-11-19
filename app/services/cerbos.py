@@ -40,20 +40,25 @@ ADMIN_RESOURCE_TYPES: tuple[str, ...] = (
 ADMIN_ACTIONS: tuple[str, ...] = (
     "action:create",
     "action:delete",
+    "action:list",
+    "action:read",
     "action:update",
     "group:add_member",
     "group:assign_role",
     "group:create",
     "group:delete",
+    "group:list",
     "group:remove_member",
     "group:remove_role",
     "group:view_members",
     "group:view_roles",
     "mapping:create",
     "mapping:delete",
+    "mapping:list",
     "mapping:update",
     "role:create",
     "role:delete",
+    "role:list",
     "role:modify_actions",
     "role:view_actions",
     "user:list",
@@ -480,36 +485,32 @@ class CerbosService(BaseService):
         """
         Principal policy rules for the actions of a non-superadmin user (DEV-556).
 
-        Application actions are allowed on every resource except the admin
-        ones, where the same names are explicitly denied (Cerbos: DENY wins
-        over the ALLOW of the "*" rule). Actions of the reserved "heimdall:"
-        namespace are allowed only on the admin resources.
+        Every action of the user is allowed on every resource, but on the
+        admin resources only the reserved "heimdall:" actions stay allowed:
+        the application actions are explicitly denied there (Cerbos: DENY wins
+        over the ALLOW of the "*" rule). "heimdall:" actions stay allowed on
+        "*" so the gateway (ext_authz, kind "generic") can map Heimdall's own
+        routes to them.
         """
         if not action_names:
             return [{"resource": "*", "actions": [{"action": "*", "effect": "EFFECT_DENY"}]}]
 
+        rules: list[dict[str, Any]] = [
+            {
+                "resource": "*",
+                "actions": [
+                    {"action": name, "effect": "EFFECT_ALLOW"} for name in sorted(action_names)
+                ],
+            }
+        ]
         app_actions = sorted(name for name in action_names if not is_admin_action(name))
-        admin_actions = sorted(name for name in action_names if is_admin_action(name))
-
-        rules: list[dict[str, Any]] = []
         if app_actions:
-            rules.append(
-                {
-                    "resource": "*",
-                    "actions": [
-                        {"action": name, "effect": "EFFECT_ALLOW"} for name in app_actions
-                    ],
-                }
-            )
-        for resource_type in ADMIN_RESOURCE_TYPES:
-            rules.append(
+            rules.extend(
                 {
                     "resource": resource_type,
-                    "actions": [
-                        {"action": name, "effect": "EFFECT_ALLOW"} for name in admin_actions
-                    ]
-                    + [{"action": name, "effect": "EFFECT_DENY"} for name in app_actions],
+                    "actions": [{"action": name, "effect": "EFFECT_DENY"} for name in app_actions],
                 }
+                for resource_type in ADMIN_RESOURCE_TYPES
             )
         return rules
 

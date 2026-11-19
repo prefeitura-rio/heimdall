@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.common.authz import forbidden
+from app.common.authz import forbidden, require_admin_permission
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -201,7 +201,7 @@ async def create_role(
     """
     Create a role.
     Implements POST /roles as specified in SPEC.md Section 3.4.
-    Authorization is decided by Cerbos (action `role:create` on resource `role`).
+    Authorization is decided by Cerbos (action `heimdall:role:create` on resource `role`).
     """
     # Get caller's roles for Cerbos permission check
     caller_roles = user_service.get_user_roles(db, current_user)
@@ -257,7 +257,8 @@ async def create_role(
 List all roles available in the system.
 
 **Authorization**: Requires admin privileges to list roles. The authorization
-gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:role:list` permission is checked in Cerbos before any read.
 
 **Pagination**: Use `skip` and `limit` parameters to control pagination.
 Maximum limit is 100 roles per request.
@@ -324,14 +325,26 @@ Maximum limit is 100 roles per request.
     },
 )
 async def list_roles(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     role_service: Annotated[RoleService, Depends(lambda: RoleService())],
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
     skip: int = Query(0, ge=0, description="Number of items to skip"),
     limit: int = Query(
         50, ge=1, le=100, description="Maximum number of items to return"
     ),
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="role:list",
+        resource_type="role",
+        operation="list_roles",
+        detail="Permission denied to list roles",
+    )
     roles, total_count = role_service.list_roles(db=db, skip=skip, limit=limit)
 
     role_responses = [
@@ -645,7 +658,7 @@ Permissions are checked via Cerbos policies.
                         },
                         {
                             "id": 2,
-                            "name": "user:list",
+                            "name": "heimdall:user:list",
                             "description": "List users in the system",
                         },
                     ]
@@ -1210,7 +1223,7 @@ async def delete_role(
             )
 
         # Check if role exists only after authorization, so a caller without
-        # role:delete cannot tell existing roles from missing ones (403 for both)
+        # heimdall:role:delete cannot tell existing roles from missing ones (403 for both)
         role = role_service.get_role_by_name(db, role_name)
         if not role:
             raise HTTPException(

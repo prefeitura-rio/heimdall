@@ -114,19 +114,16 @@ def test_app_actions_are_denied_on_every_admin_resource():
         assert _effect(policy, resource_type, "user:read") == "EFFECT_DENY"
 
 
-def test_prefixed_admin_action_allowed_only_on_admin_resources():
+def test_prefixed_admin_action_allowed_for_admin_routes_and_gateway():
     policy = _policy({"go:admin": ["heimdall:group:add_member"]}, ["go:admin"])
 
-    for resource_type in ADMIN_RESOURCE_TYPES:
+    for resource_type in (*ADMIN_RESOURCE_TYPES, "generic"):
         assert (
             _effect(policy, resource_type, "heimdall:group:add_member")
             == "EFFECT_ALLOW"
         )
         assert _effect(policy, resource_type, "heimdall:group:delete") == "EFFECT_DENY"
-    assert _effect(policy, "generic", "heimdall:group:add_member") == "EFFECT_DENY"
-    assert not any(
-        rule["resource"] == "*" for rule in policy["principalPolicy"]["rules"]
-    )
+        assert _effect(policy, resource_type, "group:add_member") == "EFFECT_DENY"
 
 
 def test_admin_plus_app_role_keeps_both_kinds_of_access():
