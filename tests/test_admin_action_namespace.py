@@ -338,3 +338,64 @@ def test_backfill_rolls_back_on_error(db, version_bump):
 
     assert not any(name.startswith("heimdall:") for name in _action_names(db))
     version_bump.assert_not_called()
+
+
+# Startup wiring -----------------------------------------------------------------
+
+
+def _lifespan_with(backfill, monkeypatch):
+    import asyncio
+    import importlib
+    import sys
+
+    from app.settings import settings
+
+    monkeypatch.setenv("ENABLE_BACKGROUND_TASKS", "false")
+    sys.modules.pop("app.main", None)
+    with (
+        patch.object(settings, "validate"),
+        patch.object(CerbosService, "ensure_superadmin_policy", return_value=True),
+    ):
+        main = importlib.import_module("app.main")
+    sys.modules.pop("app.main", None)
+
+    session = MagicMock()
+    session.__enter__.return_value = session
+    events = []
+
+    async def _run():
+        async with main.lifespan(main.app):
+            events.append("serving")
+
+    with (
+        patch("app.database.get_db_session", return_value=session),
+        patch(
+            "app.services.admin_actions.backfill_admin_actions", side_effect=backfill
+        ) as spy,
+        patch("app.services.mapping.MappingService"),
+    ):
+        asyncio.run(_run())
+    return spy, session, events
+
+
+def test_startup_runs_the_backfill_before_serving(monkeypatch):
+    order = []
+
+    def _backfill(_db):
+        order.append("backfill")
+        return ["heimdall:user:list"]
+
+    spy, session, events = _lifespan_with(_backfill, monkeypatch)
+
+    spy.assert_called_once_with(session)
+    assert order + events == ["backfill", "serving"]
+
+
+def test_startup_still_serves_when_the_backfill_fails(monkeypatch):
+    def _boom(_db):
+        raise RuntimeError("synthetic database failure")
+
+    spy, _session, events = _lifespan_with(_boom, monkeypatch)
+
+    spy.assert_called_once()
+    assert events == ["serving"]
