@@ -30,6 +30,10 @@ GET_ACTION_FAILED_DETAIL = "Failed to get action"
 UPDATE_ACTION_FAILED_DETAIL = "Failed to update action"
 DELETE_ACTION_FAILED_DETAIL = "Failed to delete action"
 
+# Action name convention, enforced on create and on update alike (DEV-664).
+ACTION_NAME_PATTERN = "^[a-z0-9_:]+$"
+ACTION_NAME_RULE = "lowercase letters, numbers, underscores, and colons only"
+
 
 # Pydantic models for request/response
 class ActionCreateRequest(BaseModel):
@@ -37,11 +41,11 @@ class ActionCreateRequest(BaseModel):
 
     name: str = Field(
         ...,
-        description="Unique name for the action (lowercase letters, numbers, underscores, and colons only)",
+        description=f"Unique name for the action ({ACTION_NAME_RULE})",
         example="user:read",
         min_length=1,
         max_length=100,
-        pattern="^[a-z0-9_:]+$"
+        pattern=ACTION_NAME_PATTERN
     )
     description: str = Field(
         ...,
@@ -65,11 +69,11 @@ class ActionUpdateRequest(BaseModel):
 
     name: str | None = Field(
         None,
-        description="Updated name for the action",
+        description=f"Updated name for the action ({ACTION_NAME_RULE})",
         example="user:read",
         min_length=1,
         max_length=100,
-        pattern="^[a-zA-Z0-9_:-]+$"
+        pattern=ACTION_NAME_PATTERN
     )
     description: str | None = Field(
         None,
