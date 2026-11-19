@@ -141,9 +141,12 @@ def redact_cpf(value: Any) -> Any:
 
 
 # The service principals Heimdall itself acts as: the static API token
-# (``app/dependencies.py``) and the background reconciler
-# (``app/background_tasks.py``). Only these are fixed identities safe to export.
-KNOWN_SYSTEM_PRINCIPALS = frozenset({"system:api_client", "system:background_tasks"})
+# (``app/dependencies.py``), the background reconciler
+# (``app/background_tasks.py``) and the versioned mappings sync
+# (``app/mappings_sync.py``). Only these are fixed identities safe to export.
+KNOWN_SYSTEM_PRINCIPALS = frozenset(
+    {"system:api_client", "system:background_tasks", "system:mappings_sync"}
+)
 
 
 def subject_kind(subject: str | None) -> str:

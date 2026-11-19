@@ -256,7 +256,8 @@ async def create_role(
     description="""
 List all roles available in the system.
 
-**Authorization**: All authenticated users can list roles.
+**Authorization**: Requires admin privileges to list roles. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
 
 **Pagination**: Use `skip` and `limit` parameters to control pagination.
 Maximum limit is 100 roles per request.
@@ -306,6 +307,9 @@ Maximum limit is 100 roles per request.
                     "example": {"detail": "Could not validate credentials"}
                 }
             },
+        },
+        403: {
+            "description": "Forbidden - Insufficient permissions to list roles (admin only)",
         },
         500: {
             "description": "Internal server error",

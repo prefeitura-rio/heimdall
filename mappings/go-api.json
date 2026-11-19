@@ -1,0 +1,190 @@
+{
+  "_comment": "Mapeamentos rota→ação do go-api versionados (DEV-650). 'public' é a ação que o cerbos-ext-authz libera sem token; 'same_as' reutiliza a ação que o banco do Heimdall dá hoje à rota indicada. Aplicado por app/mappings_sync.py (plan|apply); ver README.",
+  "application": "go-api",
+  "path_prefix": "/go/",
+  "mappings": [
+    {
+      "method": "PUT",
+      "path": "/go/api/v1/empregabilidade/candidaturas/usuario/{cpf}/visualizar",
+      "same_as": {
+        "method": "GET",
+        "path": "/go/api/v1/empregabilidade/candidaturas/usuario/{cpf}"
+      },
+      "description": "Marca como visualizadas as atualizações das candidaturas do próprio cidadão",
+      "source": "DEV-567"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/modelos-trabalho",
+      "action": "public",
+      "description": "Lista o catálogo modelos-trabalho da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/modelos-trabalho/{id}",
+      "action": "public",
+      "description": "Busca um item do catálogo modelos-trabalho da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/tipos-pcd",
+      "action": "public",
+      "description": "Lista o catálogo tipos-pcd da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/tipos-pcd/{id}",
+      "action": "public",
+      "description": "Busca um item do catálogo tipos-pcd da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/escolaridades",
+      "action": "public",
+      "description": "Lista o catálogo escolaridades da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/escolaridades/{id}",
+      "action": "public",
+      "description": "Busca um item do catálogo escolaridades da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/tipos-conquista",
+      "action": "public",
+      "description": "Lista o catálogo tipos-conquista da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/tipos-conquista/{id}",
+      "action": "public",
+      "description": "Busca um item do catálogo tipos-conquista da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/disponibilidades",
+      "action": "public",
+      "description": "Lista o catálogo disponibilidades da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/disponibilidades/{id}",
+      "action": "public",
+      "description": "Busca um item do catálogo disponibilidades da Empregabilidade (leitura pública)",
+      "source": "DEV-545"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/instituicoes",
+      "action": "public",
+      "description": "Lista instituições (leitura pública)",
+      "source": "DEV-498"
+    },
+    {
+      "method": "POST",
+      "path": "/go/api/v1/instituicoes",
+      "same_as": {
+        "method": "POST",
+        "path": "/go/api/v1/categorias"
+      },
+      "description": "Cria instituição",
+      "source": "DEV-498"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/instituicoes/{id}",
+      "action": "public",
+      "description": "Busca uma instituição (leitura pública)",
+      "source": "DEV-498"
+    },
+    {
+      "method": "PUT",
+      "path": "/go/api/v1/instituicoes/{id}",
+      "same_as": {
+        "method": "PUT",
+        "path": "/go/api/v1/categorias/{id}"
+      },
+      "description": "Atualiza uma instituição",
+      "source": "DEV-498"
+    },
+    {
+      "method": "DELETE",
+      "path": "/go/api/v1/instituicoes/{id}",
+      "same_as": {
+        "method": "DELETE",
+        "path": "/go/api/v1/categorias/{id}"
+      },
+      "description": "Remove uma instituição",
+      "source": "DEV-498"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empresas",
+      "action": "public",
+      "description": "Lista empresas (leitura pública)",
+      "source": "DEV-498"
+    },
+    {
+      "method": "POST",
+      "path": "/go/api/v1/empresas",
+      "same_as": {
+        "method": "POST",
+        "path": "/go/api/v1/categorias"
+      },
+      "description": "Cria empresa",
+      "source": "DEV-498"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empresas/{id}",
+      "action": "public",
+      "description": "Busca uma empresa (leitura pública)",
+      "source": "DEV-498"
+    },
+    {
+      "method": "PUT",
+      "path": "/go/api/v1/empresas/{id}",
+      "same_as": {
+        "method": "PUT",
+        "path": "/go/api/v1/categorias/{id}"
+      },
+      "description": "Atualiza uma empresa",
+      "source": "DEV-498"
+    },
+    {
+      "method": "DELETE",
+      "path": "/go/api/v1/empresas/{id}",
+      "same_as": {
+        "method": "DELETE",
+        "path": "/go/api/v1/categorias/{id}"
+      },
+      "description": "Remove uma empresa",
+      "source": "DEV-498"
+    },
+    {
+      "method": "POST",
+      "path": "/go/api/v1/typesense/cursos/search",
+      "action": "public",
+      "description": "Busca de cursos no Typesense (leitura pública, como o multi-search)",
+      "source": "DEV-233"
+    },
+    {
+      "method": "POST",
+      "path": "/go/api/v1/typesense/empregos/search",
+      "action": "public",
+      "description": "Busca de empregos no Typesense (leitura pública, como o multi-search)",
+      "source": "DEV-233"
+    }
+  ],
+  "remove": []
+}
