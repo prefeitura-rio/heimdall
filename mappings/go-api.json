@@ -85,6 +85,20 @@
     },
     {
       "method": "GET",
+      "path": "/go/api/v1/empregabilidade/idiomas/{id}",
+      "action": "public",
+      "description": "Busca um item do catálogo idiomas da Empregabilidade (leitura pública)",
+      "source": "DEV-659"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/situacoes-atual/{id}",
+      "action": "public",
+      "description": "Busca um item do catálogo situacoes-atual da Empregabilidade (leitura pública)",
+      "source": "DEV-659"
+    },
+    {
+      "method": "GET",
       "path": "/go/api/v1/instituicoes",
       "action": "public",
       "description": "Lista instituições (leitura pública)",
