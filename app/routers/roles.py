@@ -17,7 +17,7 @@ from app.exceptions import GroupNotFoundError
 from app.logging_config import get_structured_logger
 from app.models import User
 from app.services.action import ActionService
-from app.services.cerbos import CerbosService
+from app.services.cerbos import CerbosService, admin_action
 from app.services.role import RoleService
 from app.services.user import UserService
 
@@ -444,7 +444,7 @@ async def list_group_roles(
     can_view = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="group:view_roles",
+        action=admin_action("group:view_roles"),
         resource_type="group",
         resource_attrs={"name": group_name},
     )
@@ -703,7 +703,7 @@ async def list_role_actions(
     can_view = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:view_actions",
+        action=admin_action("role:view_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
@@ -862,7 +862,7 @@ async def assign_action_to_role(
     can_modify = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:modify_actions",
+        action=admin_action("role:modify_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
@@ -1032,7 +1032,7 @@ async def remove_action_from_role(
     can_modify = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:modify_actions",
+        action=admin_action("role:modify_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
@@ -1189,7 +1189,7 @@ async def delete_role(
         is_allowed = cerbos_service.check_permission(
             caller_subject=current_user.subject,
             caller_roles=caller_roles,
-            action="role:delete",
+            action=admin_action("role:delete"),
             resource_type="role",
             resource_attrs={"name": role_name},
         )

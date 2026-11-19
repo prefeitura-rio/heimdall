@@ -16,7 +16,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.logging_config import get_structured_logger
 from app.models import Membership, User
-from app.services.cerbos import CerbosService
+from app.services.cerbos import CerbosService, admin_action
 from app.services.user import UserService
 
 router = APIRouter()
@@ -165,7 +165,7 @@ async def list_users(
     can_list = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="user:list",
+        action=admin_action("user:list"),
         resource_type="user",
         resource_attrs={},
     )
@@ -443,7 +443,7 @@ async def get_user_by_cpf(
         can_read = cerbos_service.check_permission(
             caller_subject=current_user.subject,
             caller_roles=caller_roles,
-            action="user:list",
+            action=admin_action("user:list"),
             resource_type="user",
             resource_attrs={},
         )

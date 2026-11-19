@@ -48,7 +48,7 @@ logger = get_structured_logger(__name__)
 # Bump _POLICY_HASH_SCHEMA whenever the hash inputs below change, so old
 # cached hashes are treated as unknown (safe -> re-push) rather than
 # compared against a differently-computed value.
-_POLICY_HASH_SCHEMA = "v2"
+_POLICY_HASH_SCHEMA = "v3"  # v3: principal policy rules per admin resource (DEV-556)
 _NO_POLICY_SENTINEL = "__no_policy__"
 _POLICY_HASH_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 _POLICY_HASH_TTL_JITTER_SECONDS = 24 * 3600  # +0-1 day, avoids mass-expiry

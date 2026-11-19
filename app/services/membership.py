@@ -11,7 +11,7 @@ from app.models import Group, Membership, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
-from app.services.cerbos import CerbosService
+from app.services.cerbos import CerbosService, admin_action
 from app.tracing import subject_kind
 
 
@@ -50,7 +50,7 @@ class MembershipService(BaseService):
                     can_add = self.cerbos_service.check_permission(
                         caller_subject=caller_subject,
                         caller_roles=caller_roles,
-                        action="group:add_member",
+                        action=admin_action("group:add_member"),
                         resource_type="group",
                         resource_attrs={"name": group_name},
                     )
@@ -224,7 +224,7 @@ class MembershipService(BaseService):
                 can_remove = self.cerbos_service.check_permission(
                     caller_subject=caller_subject,
                     caller_roles=caller_roles,
-                    action="group:remove_member",
+                    action=admin_action("group:remove_member"),
                     resource_type="group",
                     resource_attrs={"name": group_name},
                 )
@@ -361,7 +361,7 @@ class MembershipService(BaseService):
                     can_view = self.cerbos_service.check_permission(
                         caller_subject=caller_subject,
                         caller_roles=caller_roles,
-                        action="group:view_members",
+                        action=admin_action("group:view_members"),
                         resource_type="group",
                         resource_attrs={"name": group_name},
                     )

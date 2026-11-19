@@ -106,7 +106,7 @@ def test_can_create_role_checks_role_create_with_role_name():
     check.assert_called_once_with(
         caller_subject="uuid-caller",
         caller_roles=["role_manager"],
-        action="role:create",
+        action="heimdall:role:create",
         resource_type="role",
         resource_attrs={"name": "x:y"},
     )

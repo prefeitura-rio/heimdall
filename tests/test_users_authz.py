@@ -91,7 +91,7 @@ def test_list_denied_caller_gets_audited_403_without_reading_users():
     cerbos_service.check_permission.assert_called_once_with(
         caller_subject=CALLER_CPF,
         caller_roles=["go:cursos:editor"],
-        action="user:list",
+        action="heimdall:user:list",
         resource_type="user",
         resource_attrs={},
     )
@@ -165,7 +165,7 @@ def test_get_other_denied_caller_gets_identical_403_before_lookup(target_exists)
     cerbos_service.check_permission.assert_called_once_with(
         caller_subject=CALLER_CPF,
         caller_roles=["go:cursos:editor"],
-        action="user:list",
+        action="heimdall:user:list",
         resource_type="user",
         resource_attrs={},
     )
@@ -279,12 +279,11 @@ def test_http_routes_enforce_authorization(client_factory, path, allowed, expect
 
 
 # Real principal policies ----------------------------------------------------
-# Heimdall grants every action of a caller's roles on every resource kind
-# (principal policy with resource "*"). Application roles carry generic action
-# names such as "user:read" (mapped to app routes), so the admin check on the
-# user resource must not use an action an app role can hold by accident.
-# Staging regression: the Editor — Cursos profile (app roles only) was denied
-# GET /users/ but could read any other user, superadmins included.
+# Application roles carry free-form action names (mapped to app routes), so an
+# app role may hold "user:read" or even "user:list". Staging regression
+# (DEV-550/DEV-556): the Editor — Cursos profile (app roles only) read any
+# other user, superadmins included. The admin check uses the reserved
+# "heimdall:" namespace, and the policy denies app actions on admin resources.
 
 
 def _policy_cerbos(role_actions):
@@ -330,14 +329,15 @@ def _policy_cerbos(role_actions):
     def _check(caller_subject, caller_roles, action, resource_type, **_resource):
         with patch("app.database.get_db_session", side_effect=_session):
             policy = real.build_principal_policy(caller_subject, caller_roles)
-        effect = "EFFECT_DENY"
-        for rule in policy["principalPolicy"]["rules"]:
-            if rule["resource"] not in ("*", resource_type):
-                continue
-            for entry in rule["actions"]:
-                if entry["action"] in ("*", action):
-                    effect = entry["effect"]
-        return effect == "EFFECT_ALLOW"
+        effects = {
+            entry["effect"]
+            for rule in policy["principalPolicy"]["rules"]
+            if rule["resource"] in ("*", resource_type)
+            for entry in rule["actions"]
+            if entry["action"] in ("*", action)
+        }
+        # Cerbos: no matching rule denies, and DENY wins over ALLOW.
+        return effects == {"EFFECT_ALLOW"}
 
     cerbos_service = MagicMock()
     cerbos_service.check_permission.side_effect = _check
@@ -345,6 +345,8 @@ def _policy_cerbos(role_actions):
 
 
 APP_ROLE_ACTIONS = {"go:cursos:editor": ["cursos:edit", "user:read"]}
+# An app role whose free-form action happens to share the admin name.
+APP_ROLE_WITH_ADMIN_NAME = {"go:cursos:editor": ["cursos:edit", "user:list"]}
 
 
 def test_app_role_with_generic_user_read_action_cannot_read_other_users():
@@ -370,11 +372,34 @@ def test_app_role_with_generic_user_read_action_cannot_list_users():
     db.query.assert_not_called()
 
 
+def test_app_role_with_un_prefixed_user_list_action_cannot_read_other_users():
+    target = _user(OTHER_CPF, 8, "Superadmin")
+    user_service = _user_service(target)
+    cerbos_service = _policy_cerbos(APP_ROLE_WITH_ADMIN_NAME)
+
+    result, exc, _audit = _get(OTHER_CPF, user_service, cerbos_service)
+
+    assert result is None
+    assert exc.status_code == 403
+    user_service.get_user_by_subject.assert_not_called()
+
+
+def test_app_role_with_un_prefixed_user_list_action_cannot_list_users():
+    db = _db_with_users([_user(OTHER_CPF, 8)])
+    cerbos_service = _policy_cerbos(APP_ROLE_WITH_ADMIN_NAME)
+
+    result, exc, _audit = _list(db, _user_service(), cerbos_service)
+
+    assert result is None
+    assert exc.status_code == 403
+    db.query.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("roles", "role_actions"),
     [
         (["superadmin"], {}),
-        (["user-admin"], {"user-admin": ["user:list"]}),
+        (["user-admin"], {"user-admin": ["heimdall:user:list"]}),
     ],
     ids=["superadmin", "role-with-user-list"],
 )

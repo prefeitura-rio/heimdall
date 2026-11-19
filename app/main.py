@@ -155,6 +155,27 @@ async def lifespan(_app: FastAPI):
             operation="startup_background_services_disabled",
         )
 
+    # Admin action namespace backfill (DEV-556), before serving any request
+    try:
+        from app.database import get_db_session
+        from app.services.admin_actions import backfill_admin_actions
+
+        with get_db_session() as db:
+            created_admin_actions = backfill_admin_actions(db)
+
+        logger.log_operation(
+            level=20,  # INFO
+            message="Admin action namespace backfill completed",
+            operation="startup_admin_action_backfill",
+            extra_fields={"created_count": len(created_admin_actions)},
+        )
+    except Exception as e:
+        logger.log_operation(
+            level=40,  # ERROR
+            message=f"Admin action namespace backfill error: {type(e).__name__}",
+            operation="startup_admin_action_backfill_error",
+        )
+
     # Sync mappings to Redis on startup (always, regardless of background tasks)
     try:
         from app.database import get_db_session

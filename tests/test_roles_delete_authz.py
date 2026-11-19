@@ -67,7 +67,7 @@ def test_denied_caller_gets_audited_403_whether_or_not_the_role_exists(role_exis
     cerbos_service.check_permission.assert_called_once_with(
         caller_subject="uuid-caller",
         caller_roles=["viewer"],
-        action="role:delete",
+        action="heimdall:role:delete",
         resource_type="role",
         resource_attrs={"name": "data_analyst:read"},
     )
