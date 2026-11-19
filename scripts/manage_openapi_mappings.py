@@ -28,6 +28,20 @@ Usage:
     # Apply changes without confirmation (CI/CD mode)
     python manage_openapi_mappings.py apply --config config.json --state state.json --auto-approve
 
+Deleting mappings (options.delete_unmanaged):
+    Keep it false (the default, and the value in config.example.json). When it
+    is true, 'plan' and 'apply' treat as DELETE every mapping in Heimdall that
+    is not generated from the configured OpenAPI specs: the mappings of any
+    application missing from 'apis', and the routes an application serves but
+    has not documented in its OpenAPI yet.
+
+go-api mappings:
+    The go-api mappings are versioned in mappings/go-api.json and applied by
+    app.mappings_sync (python -m app.mappings_sync apply --file
+    mappings/go-api.json), not by this tool. Do not
+    run 'apply' with delete_unmanaged true over Heimdall: it deletes the
+    versioned go-api mappings whose routes are not in the go-api OpenAPI.
+
 State File:
     The state file (JSON) maps each endpoint pattern to an action name. You must
     manually edit this file to replace 'FILL_HERE' with actual action names before
