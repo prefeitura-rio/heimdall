@@ -128,6 +128,16 @@ def staging_like(db):
     ):
         _mapping(db, "GET", f"{go}/empregabilidade/{catalog}$", CITIZEN_ACTION)
         _mapping(db, "GET", f"{go}/empregabilidade/{catalog}/([^/]+)$", CITIZEN_ACTION)
+    # DEV-659: idiomas and situacoes-atual are listed publicly, but their GET by
+    # id is unmapped (idiomas) or mapped to an authenticated action
+    # (situacoes-atual); their writes stay with the admin action.
+    for catalog in ("idiomas", "situacoes-atual"):
+        _mapping(db, "GET", f"{go}/empregabilidade/{catalog}$", "public")
+        _mapping(db, "POST", f"{go}/empregabilidade/{catalog}$", WRITE_ACTION)
+        _mapping(db, "PUT", f"{go}/empregabilidade/{catalog}/([^/]+)$", WRITE_ACTION)
+    _mapping(
+        db, "GET", f"{go}/empregabilidade/situacoes-atual/([^/]+)$", CITIZEN_ACTION
+    )
     # Same route without "/go", as the OpenAPI tool also generates it.
     _mapping(db, "GET", "/api/v1/empregabilidade/tipos-pcd$", CITIZEN_ACTION)
     # A mapping of another application, never to be touched.
@@ -206,7 +216,7 @@ def test_versioned_file_covers_the_four_cases_of_the_issue():
             entries[("POST", f"/go/api/v1/typesense/{kind}/search")].action == "public"
         )
 
-    assert len(spec.mappings) == 23
+    assert len(spec.mappings) == 25
     assert spec.remove == []
 
 
@@ -241,7 +251,7 @@ def test_plan_on_staging_like_db_shows_what_enters_and_changes(staging_like):
     assert creates[("DELETE", "/go/api/v1/instituicoes/([^/]+)$")] == WRITE_ACTION
     assert creates[("GET", "/go/api/v1/instituicoes$")] == "public"
     assert creates[("POST", "/go/api/v1/typesense/cursos/search$")] == "public"
-    assert len(creates) == 13
+    assert len(creates) == 14
     assert updates[("GET", "/go/api/v1/empregabilidade/tipos-pcd/([^/]+)$")] == (
         CITIZEN_ACTION,
         "public",
@@ -251,8 +261,59 @@ def test_plan_on_staging_like_db_shows_what_enters_and_changes(staging_like):
         CITIZEN_ACTION,
         "public",
     )
-    assert len(updates) == 11
+    assert len(updates) == 12
     assert not any(c.kind == ChangeKind.DELETE for c in plan.changes)
+
+
+def test_versioned_file_makes_idiomas_and_situacoes_atual_by_id_public():
+    spec = load_mapping_file(REPO_FILE)
+    entries = {(e.method, e.path): e for e in spec.mappings}
+    for catalog in ("idiomas", "situacoes-atual"):
+        entry = entries[("GET", f"/go/api/v1/empregabilidade/{catalog}/{{id}}")]
+        assert entry.action == "public"
+        assert entry.source == "DEV-659"
+    # Only the GET by id is declared: no write route of these catalogs is in
+    # the file, so the sync never touches their admin action.
+    declared = {
+        (e.method, e.path)
+        for e in spec.mappings
+        if "/idiomas" in e.path or "/situacoes-atual" in e.path
+    }
+    assert declared == {
+        ("GET", "/go/api/v1/empregabilidade/idiomas/{id}"),
+        ("GET", "/go/api/v1/empregabilidade/situacoes-atual/{id}"),
+    }
+
+
+def test_apply_makes_idiomas_and_situacoes_atual_by_id_public_keeping_writes(
+    staging_like, engine, service
+):
+    db = staging_like
+    go = "/go/api/v1/empregabilidade"
+    plan = build_plan(db, load_mapping_file(REPO_FILE))
+    assert plan.errors == []
+    changes = {
+        (c.method, c.path_pattern): (c.kind, c.old_action_name, c.action_name)
+        for c in plan.changes
+    }
+    assert changes[("GET", f"{go}/idiomas/([^/]+)$")] == (
+        ChangeKind.CREATE,
+        None,
+        "public",
+    )
+    assert changes[("GET", f"{go}/situacoes-atual/([^/]+)$")] == (
+        ChangeKind.UPDATE,
+        CITIZEN_ACTION,
+        "public",
+    )
+
+    assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_OK
+    after = _actions_by_key(db)
+    for catalog in ("idiomas", "situacoes-atual"):
+        assert after[("GET", f"{go}/{catalog}/([^/]+)$")] == "public"
+        assert after[("GET", f"{go}/{catalog}$")] == "public"
+        assert after[("POST", f"{go}/{catalog}$")] == WRITE_ACTION
+        assert after[("PUT", f"{go}/{catalog}/([^/]+)$")] == WRITE_ACTION
 
 
 def test_apply_is_idempotent_and_leaves_other_mappings_alone(
@@ -294,7 +355,7 @@ def test_apply_is_idempotent_and_leaves_other_mappings_alone(
     capsys.readouterr()
     assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_OK
     out = capsys.readouterr().out
-    assert "0 to create, 0 to update, 0 to delete, 23 unchanged" in out
+    assert "0 to create, 0 to update, 0 to delete, 25 unchanged" in out
     assert "No changes to apply." in out
     assert db.query(Endpoint).count() == count
 
@@ -305,7 +366,7 @@ def test_plan_command_never_writes(staging_like, engine, service, capsys):
     assert run("plan", str(REPO_FILE), db, engine, service) == EXIT_OK
     assert _actions_by_key(db) == before
     out = capsys.readouterr().out
-    assert "13 to create, 11 to update, 0 to delete" in out
+    assert "14 to create, 12 to update, 0 to delete" in out
     assert "Dry run (plan): nothing was written." in out
     service.redis_mapping_service.store_mapping.assert_not_called()
 
