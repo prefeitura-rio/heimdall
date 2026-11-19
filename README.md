@@ -276,6 +276,61 @@ The background service runs automated maintenance tasks:
 - **Exponential Backoff**: Smart retry timing to avoid overwhelming services
 - **Alert Generation**: Logging for permanently failed operations
 
+## 🗺️ Versioned Endpoint Mappings
+
+The endpoint-to-action mappings of an application can be versioned in this
+repository instead of being created by hand through the admin API. Today the
+go-api has one: [`mappings/go-api.json`](mappings/go-api.json).
+
+### File format
+- `path_prefix`: every route of the file must start with it (`/go/` for the go-api).
+- `mappings`: one entry per route, `method` + OpenAPI-style `path`
+  (`/go/api/v1/empresas/{id}`; the regex is generated, `{param}` becomes
+  `([^/]+)` and `$` is appended, as `scripts/manage_openapi_mappings.py` does),
+  and exactly one of:
+  - `action`: the action name. `public` lets the request through the edge
+    without a token; `authenticated` only requires a valid JWT; any other
+    action is checked against Cerbos (see `prefeitura-rio/cerbos-ext-authz`).
+  - `same_as`: `{method, path}` of another route; the route gets the action the
+    database maps to that route when the sync runs. Use it when the action
+    name is only known by the database (it fails if that route has no mapping).
+- `remove`: routes whose mapping must not exist. Nothing is ever deleted
+  unless listed here, and only inside `path_prefix`.
+
+### Plan (dry run) and apply
+```bash
+# Read-only: what would be created (+), changed (~) and deleted (-)
+uv run python -m app.mappings_sync plan --file mappings/go-api.json
+
+# Same plan, then applied (idempotent: a second run changes nothing)
+uv run python -m app.mappings_sync apply --file mappings/go-api.json
+```
+Both use `DB_DSN` and `REDIS_URL` of the target Heimdall and write through the
+same service as the admin API (database, Redis read by the edge, audit log as
+`system:mappings_sync`). The run aborts before any write, with the reason, when
+an action does not exist, a `same_as` resolves to no action or to two, or an
+existing pattern of another route also matches a declared route with a
+different action. Exit codes: `0` ok, `1` invalid file, `2` plan errors (nothing
+written), `3` some writes failed (rerun to converge).
+
+### Staging
+The `mappings-sync` initContainer of `heimdall-admin` (`k8s/staging`) runs
+`apply` after the migrations on every rollout, so a merge to `staging` that
+changes the file is applied by the normal deploy. Its output is the plan and
+the result: `kubectl -n heimdall logs deploy/heimdall-admin -c mappings-sync`.
+If it fails, the new pods stay in `Init` and the previous ones keep serving.
+
+### Production
+Production (`k8s/prod`, branch `main`) does not run the sync yet. To enable it:
+1. With read access to the production database, run `plan` against it and check
+   the output: every `same_as` must resolve and no error may be listed.
+2. Open a PR to `main` adding the same `mappings-sync` initContainer to
+   `k8s/prod/resources.yaml` (image `:stable`). When it is promoted, every
+   rollout applies the file; the initContainer log shows what changed.
+3. Rollback: revert that PR (the sync stops) and, if needed, restore the
+   previous action of a mapping with `PUT /api/v1/mappings/{id}`; the plan
+   output lists the ids and the old actions.
+
 ## 🧪 Development
 
 ### Code Quality
