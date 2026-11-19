@@ -735,7 +735,8 @@ async def delete_mapping(
     description="""
 Retrieve a list of all endpoint-to-action mappings with optional filtering.
 
-**Authorization**: All authenticated users can list mappings.
+**Authorization**: Requires admin privileges to list mappings. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
 
 **Filtering**: Use the action_filter parameter to show only mappings for
 a specific action (exact match on action name).
@@ -789,6 +790,9 @@ interfaces and configuration management tools.
                     }
                 }
             }
+        },
+        403: {
+            "description": "Forbidden - Insufficient permissions to list mappings (admin only)",
         },
         500: {
             "description": "Internal server error",

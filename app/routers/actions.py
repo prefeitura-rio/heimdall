@@ -352,7 +352,8 @@ async def create_action(
     description="""
 Retrieve a paginated list of all actions available in the system.
 
-**Authorization**: All authenticated users can list actions.
+**Authorization**: Requires admin privileges to list actions. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
 
 **Pagination**: Use `skip` and `limit` parameters to control pagination.
 Maximum limit is 100 actions per request.
@@ -420,6 +421,9 @@ number of API endpoints currently mapped to it.
                     }
                 }
             }
+        },
+        403: {
+            "description": "Forbidden - Insufficient permissions to list actions (admin only)",
         },
         500: {
             "description": "Internal server error",
