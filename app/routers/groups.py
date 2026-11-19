@@ -240,7 +240,8 @@ List all groups in the system with optional filtering.
 
 **Filtering**: Use the `prefix` query parameter to filter groups by name prefix.
 
-**Authorization**: All authenticated users can list groups.
+**Authorization**: Requires admin privileges to list groups. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
 
 **Performance**: Results are cached for optimal performance. Large result sets
 may be paginated in future versions.
@@ -283,6 +284,9 @@ may be paginated in future versions.
                     }
                 }
             }
+        },
+        403: {
+            "description": "Forbidden - Insufficient permissions to list groups (admin only)",
         },
         500: {
             "description": "Internal server error",
