@@ -328,6 +328,8 @@ Always before making an administrative mutation that affects permissions or grou
 
 For any operation where the caller must be explicitly authorized, do a Cerbos Check.
 
+**Reserved admin namespace (DEV-556):** the admin routes check these actions with the `heimdall:` prefix (`heimdall:group:add_member`, `heimdall:user:list`…), the list in `ADMIN_ACTIONS` (`app/services/cerbos.py`). Application roles use free-form action names, so a non-superadmin principal policy grants `heimdall:` actions only on the admin resources (`group`, `user`, `role`, `action`, `mapping`, `membership`) and denies every other action of the user there; application actions keep working on any other resource kind. Delegated administration means granting a role the `heimdall:` action. On startup, each missing `heimdall:` action is created once and granted to the roles that held the legacy un-prefixed name (expand phase); removing the legacy names is a later contract step.
+
 **Example Cerbos Check payload (group:add_member):**
 ```json
 {
