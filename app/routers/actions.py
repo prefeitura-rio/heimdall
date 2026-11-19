@@ -485,7 +485,8 @@ async def list_actions(
     description="""
 Retrieve detailed information about a specific action by its ID.
 
-**Authorization**: All authenticated users can read action information.
+**Authorization**: Requires admin privileges to read actions. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
 
 **Action Details**: Returns the action's name, description, and number of
 API endpoints currently mapped to this action.
@@ -519,6 +520,9 @@ API endpoints currently mapped to this action.
                     }
                 }
             }
+        },
+        403: {
+            "description": "Forbidden - Insufficient permissions to read actions (admin only)",
         },
         404: {
             "description": "Action not found",
