@@ -198,6 +198,20 @@
       "action": "public",
       "description": "Busca de empregos no Typesense (leitura pública, como o multi-search)",
       "source": "DEV-233"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/public/courses",
+      "action": "public",
+      "description": "Lista o catálogo público de cursos do cidadão (leitura pública)",
+      "source": "DEV-705"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/public/courses/{id}",
+      "action": "public",
+      "description": "Busca um curso do catálogo público do cidadão (leitura pública)",
+      "source": "DEV-705"
     }
   ],
   "remove": []
