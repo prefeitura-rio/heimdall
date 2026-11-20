@@ -82,7 +82,8 @@ done
 {
   "id": 1,
   "method": "GET",
-  "path_pattern": "/heimdall-admin/api/v1/users/(.*)",
+  "path_pattern": "^/heimdall-admin/api/v1/users/(.*)$",
+  "source_path_pattern": "/heimdall-admin/api/v1/users/(.*)",
   "action_id": 5,
   "action_name": "user:read",
   "description": "Get user information",
@@ -90,6 +91,11 @@ done
   "updated_at": "2025-09-19T10:00:00Z"
 }
 ```
+
+`path_pattern` is the anchored regex (`^...$`) Heimdall matches with, the same
+rule as its database fallback: match it as is (`re.match`, `regexp.MatchString`)
+and a longer path never matches by prefix. `source_path_pattern` is the pattern
+as stored in the database, for display only.
 
 ## Language-Specific Examples
 

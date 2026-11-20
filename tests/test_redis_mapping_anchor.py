@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.models import Action, Endpoint, User
 from app.services.mapping import MappingService
-from app.services.redis_mapping import RedisMappingService
+from app.services.redis_mapping import SOURCE_PATTERN_KEY, RedisMappingService
 from app.tracing import setup_tracing
 
 
@@ -42,6 +42,9 @@ class FakeRedis:
         value = self.hashes.get(name, {}).get(key)
         return value.encode() if value is not None else None
 
+    def hgetall(self, name):
+        return {k.encode(): v.encode() for k, v in self.hashes.get(name, {}).items()}
+
     def lrem(self, name, _count, value):
         self.lists[name] = [v for v in self.lists.get(name, []) if v != value]
 
@@ -57,6 +60,10 @@ class FakeRedis:
 
     def setex(self, key, _ttl, value):
         self.values[key] = value
+
+    def delete(self, *keys):
+        for key in keys:
+            self.values.pop(key, None)
 
 
 @pytest.fixture
@@ -189,7 +196,7 @@ def db():
 
 
 def test_mapping_created_by_api_resolves_the_same_from_redis_and_db(redis_service, db):
-    """End to end: POST /mappings/ stores the raw pattern; both paths agree."""
+    """End to end through create_mapping: Redis and the database agree."""
     user = User(subject="synthetic-admin", display_name="Synthetic Admin")
     action = Action(name="heimdall:actions:list", description="Synthetic action")
     db.add_all([user, action])
@@ -213,13 +220,109 @@ def test_mapping_created_by_api_resolves_the_same_from_redis_and_db(redis_servic
             f"mapping_{endpoint.id}"
         ]
     )
-    assert stored["path_pattern"] == "/api/v1/actions"
+    # Redis keeps the anchored regex every reader matches, and the raw column.
+    assert stored["path_pattern"] == "^/api/v1/actions$"
+    assert stored[SOURCE_PATTERN_KEY] == "/api/v1/actions"
 
-    # Redis hit for the exact route.
-    assert (
-        service.resolve_mapping(db, "/api/v1/actions", "GET")["mapping_id"]
-        == endpoint.id
-    )
+    # Redis hit for the exact route; the response shows the database pattern.
+    result = service.resolve_mapping(db, "/api/v1/actions", "GET")
+    assert result["mapping_id"] == endpoint.id
+    assert result["path_pattern"] == "/api/v1/actions"
     # Longer route: Redis no longer matches by prefix, and the database refuses it too.
     assert service.resolve_mapping(db, "/api/v1/actionsEXPORTALL", "GET") is None
     assert service.resolve_mapping(db, "/api/v1/actions/1", "GET") is None
+
+
+def _stored(svc, mapping_id=1):
+    return json.loads(
+        svc.redis_client.hashes["heimdall:mappings:all"][f"mapping_{mapping_id}"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("path_pattern", "matching", "not_matching"),
+    [
+        (
+            "/api/v1/actions",
+            "/api/v1/actions",
+            ["/api/v1/actionsEXPORTALL", "/api/v1/actions/1", "/x/api/v1/actions"],
+        ),
+        ("/health$", "/health", ["/healthz", "/x/health"]),
+        ("/users/([^/]+)$", "/users/1", ["/users/1/roles", "/x/users/1"]),
+        ("/api/v1.0/x", "/api/v1.0/x", ["/api/v1X0/x"]),
+    ],
+)
+def test_stored_pattern_is_anchored_for_the_edge(
+    redis_service, path_pattern, matching, not_matching
+):
+    """
+    The edge (cerbos-ext-authz) reads heimdall:mappings:all directly and runs
+    regexp.MatchString(path_pattern, path), an unanchored search. re.search is
+    the same semantics: the stored pattern must refuse prefixes by itself.
+    """
+    _store(redis_service, path_pattern)
+
+    stored = _stored(redis_service)
+
+    assert stored[SOURCE_PATTERN_KEY] == path_pattern
+    assert re.search(stored["path_pattern"], matching)
+    for path in not_matching:
+        assert re.search(stored["path_pattern"], path) is None
+
+
+def test_store_is_idempotent_on_a_mapping_read_back(redis_service):
+    _store(redis_service, "/api/v1.0/x")
+    read_back = redis_service.get_all_mappings()[0]
+    assert read_back["path_pattern"] == "/api/v1.0/x"
+    assert SOURCE_PATTERN_KEY not in read_back
+
+    assert redis_service.store_mapping(read_back)
+
+    assert _stored(redis_service)["path_pattern"] == "^/api/v1\\.0/x$"
+
+
+def test_legacy_entry_with_raw_pattern_matches_by_the_anchored_rule(redis_service):
+    """An entry written before DEV-680 (raw pattern, no source key) until the next sync."""
+    fake = redis_service.redis_client
+    legacy = {
+        "id": 9,
+        "method": "GET",
+        "path_pattern": "/api/v1/actions",
+        "action_name": "a",
+    }
+    fake.hset("heimdall:mappings:all", "mapping_9", json.dumps(legacy))
+    fake.lpush("heimdall:mappings:patterns:GET", "mapping_9")
+
+    assert redis_service.resolve_mapping_fast("GET", "/api/v1/actionsEXPORTALL") is None
+    result = redis_service.resolve_mapping_fast("GET", "/api/v1/actions")
+    assert result is not None
+    assert result["path_pattern"] == "/api/v1/actions"
+
+
+def test_cache_entry_that_does_not_match_is_dropped(redis_service):
+    """
+    The lookup cache is shared with the edge: an entry it wrote for a prefix
+    match (before its patterns were anchored) must not be trusted.
+    """
+    _store(redis_service, "/api/v1/actions")
+    fake = redis_service.redis_client
+    cache_key = "heimdall:mappings:lookup:GET:/api/v1/actionsEXPORTALL"
+    fake.setex(cache_key, 300, "mapping_1")
+
+    assert redis_service.resolve_mapping_fast("GET", "/api/v1/actionsEXPORTALL") is None
+    assert cache_key not in fake.values
+
+
+def test_cache_entry_that_matches_is_used(redis_service):
+    _store(redis_service, "/api/v1/actions")
+
+    first = redis_service.resolve_mapping_fast("GET", "/api/v1/actions")
+    assert (
+        "heimdall:mappings:lookup:GET:/api/v1/actions"
+        in redis_service.redis_client.values
+    )
+    second = redis_service.resolve_mapping_fast("GET", "/api/v1/actions")
+
+    assert first == second
+    assert second["path_pattern"] == "/api/v1/actions"
+    assert SOURCE_PATTERN_KEY not in second

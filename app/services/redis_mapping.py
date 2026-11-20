@@ -14,6 +14,39 @@ from app.services.base import BaseService
 from app.services.path_pattern import convert_pattern_to_regex
 from app.settings import settings
 
+# Key of the raw database path_pattern inside a stored mapping. The stored
+# "path_pattern" is the anchored regex (DEV-680), because every reader of
+# heimdall:mappings:all matches it as is: this service and the edge
+# (cerbos-ext-authz, regexp.MatchString), as REDIS_MAPPING_QUERY_GUIDE.md says.
+SOURCE_PATTERN_KEY = "source_path_pattern"
+
+
+def to_stored_mapping(mapping_data: dict[str, Any]) -> dict[str, Any]:
+    """Mapping as written to Redis: path_pattern anchored, raw kept aside."""
+    # Idempotent: a mapping read back from Redis already carries the raw one.
+    raw = mapping_data.get(SOURCE_PATTERN_KEY) or mapping_data["path_pattern"]
+    return {
+        **mapping_data,
+        "path_pattern": convert_pattern_to_regex(raw),
+        SOURCE_PATTERN_KEY: raw,
+    }
+
+
+def from_stored_mapping(stored: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    """
+    Mapping as the database has it, and the regex to match a path with.
+
+    An entry written before DEV-680 has only the raw path_pattern: it is
+    converted here, so it matches by the same rule until the next sync.
+    """
+    if SOURCE_PATTERN_KEY in stored:
+        mapping = {k: v for k, v in stored.items() if k != SOURCE_PATTERN_KEY}
+        mapping["path_pattern"] = stored[SOURCE_PATTERN_KEY]
+        regex = stored.get("path_pattern")
+        return mapping, regex
+    raw = stored.get("path_pattern")
+    return stored, convert_pattern_to_regex(raw) if raw else None
+
 
 class RedisMappingService(BaseService):
     """Service for Redis mapping persistence operations with permanent storage and configurable cache."""
@@ -59,7 +92,11 @@ class RedisMappingService(BaseService):
 
                 # Store mapping details in permanent hash (no TTL)
                 mapping_key = f"mapping_{mapping_id}"
-                redis_conn.hset("heimdall:mappings:all", mapping_key, json.dumps(mapping_data))
+                redis_conn.hset(
+                    "heimdall:mappings:all",
+                    mapping_key,
+                    json.dumps(to_stored_mapping(mapping_data)),
+                )
 
                 # Update pattern list for the method (maintain order by specificity)
                 pattern_key = f"heimdall:mappings:patterns:{method}"
@@ -158,9 +195,16 @@ class RedisMappingService(BaseService):
                         # Get mapping details from permanent storage
                         mapping_data = redis_conn.hget("heimdall:mappings:all", cached_mapping_id.decode())
                         if mapping_data:
-                            span.set_attribute("redis_mapping.cache_hit", True)
-                            span.set_attribute("redis_mapping.mapping_id", cached_mapping_id.decode())
-                            return json.loads(mapping_data)
+                            mapping, regex = from_stored_mapping(json.loads(mapping_data))
+                            # The lookup cache is shared with the edge, which
+                            # writes it too: trust an entry only if its pattern
+                            # matches the path by the anchored rule (DEV-680).
+                            if regex and self._matches(regex, path, span):
+                                span.set_attribute("redis_mapping.cache_hit", True)
+                                span.set_attribute("redis_mapping.mapping_id", cached_mapping_id.decode())
+                                return mapping
+                            redis_conn.delete(cache_key)
+                            span.set_attribute("redis_mapping.stale_cache_dropped", True)
 
                 span.set_attribute("redis_mapping.cache_hit", False)
 
@@ -178,32 +222,25 @@ class RedisMappingService(BaseService):
                     if not mapping_data_str:
                         continue
 
-                    mapping_data = json.loads(mapping_data_str)
-                    path_pattern = mapping_data.get("path_pattern")
+                    mapping_data, regex = from_stored_mapping(json.loads(mapping_data_str))
 
-                    if not path_pattern:
+                    if not regex:
                         continue
 
-                    try:
-                        # Match by the same anchored rule as the database
-                        # fallback (DEV-680): the raw pattern has no end anchor
-                        # and would match any longer path by prefix.
-                        if re.match(convert_pattern_to_regex(path_pattern), path):
-                            span.set_attribute("redis_mapping.matched_pattern", path_pattern)
-                            span.set_attribute("redis_mapping.mapping_id", mapping_id)
+                    # Match by the same anchored rule as the database fallback
+                    # (DEV-680): the raw pattern has no end anchor and would
+                    # match any longer path by prefix.
+                    if self._matches(regex, path, span):
+                        span.set_attribute("redis_mapping.matched_pattern", mapping_data.get("path_pattern"))
+                        span.set_attribute("redis_mapping.mapping_id", mapping_id)
 
-                            # Cache the result for future lookups (if caching enabled)
-                            if self.cache_ttl > 0:
-                                cache_key = f"heimdall:mappings:lookup:{method}:{path}"
-                                redis_conn.setex(cache_key, self.cache_ttl, mapping_id)
-                                span.set_attribute("redis_mapping.result_cached", True)
+                        # Cache the result for future lookups (if caching enabled)
+                        if self.cache_ttl > 0:
+                            cache_key = f"heimdall:mappings:lookup:{method}:{path}"
+                            redis_conn.setex(cache_key, self.cache_ttl, mapping_id)
+                            span.set_attribute("redis_mapping.result_cached", True)
 
-                            return mapping_data
-
-                    except re.error as regex_error:
-                        span.record_exception(regex_error)
-                        span.set_attribute("redis_mapping.regex_error", str(regex_error))
-                        continue
+                        return mapping_data
 
                 span.set_attribute("redis_mapping.no_match", True)
                 return None
@@ -212,6 +249,16 @@ class RedisMappingService(BaseService):
                 span.record_exception(e)
                 span.set_attribute("redis_mapping.error", str(e))
                 return None
+
+    @staticmethod
+    def _matches(regex: str, path: str, span) -> bool:
+        """Whether path matches the anchored regex; an invalid regex never matches."""
+        try:
+            return re.match(regex, path) is not None
+        except re.error as regex_error:
+            span.record_exception(regex_error)
+            span.set_attribute("redis_mapping.regex_error", str(regex_error))
+            return False
 
     def get_all_mappings(self) -> list[dict[str, Any]]:
         """
@@ -231,7 +278,7 @@ class RedisMappingService(BaseService):
                 mappings = []
                 for mapping_data_str in all_mappings_data.values():
                     try:
-                        mapping_data = json.loads(mapping_data_str)
+                        mapping_data, _ = from_stored_mapping(json.loads(mapping_data_str))
                         mappings.append(mapping_data)
                     except json.JSONDecodeError:
                         continue
