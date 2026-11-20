@@ -216,7 +216,7 @@ def test_versioned_file_covers_the_four_cases_of_the_issue():
             entries[("POST", f"/go/api/v1/typesense/{kind}/search")].action == "public"
         )
 
-    assert len(spec.mappings) == 25
+    assert len(spec.mappings) == 27
     assert spec.remove == []
 
 
@@ -251,7 +251,7 @@ def test_plan_on_staging_like_db_shows_what_enters_and_changes(staging_like):
     assert creates[("DELETE", "/go/api/v1/instituicoes/([^/]+)$")] == WRITE_ACTION
     assert creates[("GET", "/go/api/v1/instituicoes$")] == "public"
     assert creates[("POST", "/go/api/v1/typesense/cursos/search$")] == "public"
-    assert len(creates) == 14
+    assert len(creates) == 16
     assert updates[("GET", "/go/api/v1/empregabilidade/tipos-pcd/([^/]+)$")] == (
         CITIZEN_ACTION,
         "public",
@@ -316,6 +316,60 @@ def test_apply_makes_idiomas_and_situacoes_atual_by_id_public_keeping_writes(
         assert after[("PUT", f"{go}/{catalog}/([^/]+)$")] == WRITE_ACTION
 
 
+def test_versioned_file_makes_the_public_mei_opportunities_public():
+    spec = load_mapping_file(REPO_FILE)
+    entries = {(e.method, e.path): e for e in spec.mappings}
+    for path in (
+        "/go/api/public/oportunidades-mei",
+        "/go/api/public/oportunidades-mei/{id}",
+    ):
+        entry = entries[("GET", path)]
+        assert entry.action == "public"
+        assert entry.source == "DEV-707"
+    # Only the two reads of the public group are declared: the management of
+    # the opportunities and their proposals live under /api/v1/oportunidades-mei
+    # and keep their own mappings (DEV-478).
+    declared = {
+        (e.method, e.path) for e in spec.mappings if "oportunidades-mei" in e.path
+    }
+    assert declared == {
+        ("GET", "/go/api/public/oportunidades-mei"),
+        ("GET", "/go/api/public/oportunidades-mei/{id}"),
+    }
+
+
+def test_apply_maps_the_public_mei_opportunities_keeping_the_v1_group(
+    staging_like, engine, service
+):
+    db = staging_like
+    v1 = "/go/api/v1/oportunidades-mei"
+    _mapping(db, "GET", f"{v1}/drafts$", WRITE_ACTION)
+    _mapping(db, "PUT", f"{v1}/([^/]+)$", WRITE_ACTION)
+    _mapping(db, "GET", f"{v1}/([^/]+)/propostas$", CITIZEN_ACTION)
+    plan = build_plan(db, load_mapping_file(REPO_FILE))
+    assert plan.errors == []
+    changes = {
+        (c.method, c.path_pattern): (c.kind, c.action_name)
+        for c in plan.changes
+        if "oportunidades-mei" in c.path_pattern
+    }
+    assert changes == {
+        ("GET", "/go/api/public/oportunidades-mei$"): (ChangeKind.CREATE, "public"),
+        ("GET", "/go/api/public/oportunidades-mei/([^/]+)$"): (
+            ChangeKind.CREATE,
+            "public",
+        ),
+    }
+
+    assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_OK
+    after = _actions_by_key(db)
+    assert after[("GET", "/go/api/public/oportunidades-mei$")] == "public"
+    assert after[("GET", "/go/api/public/oportunidades-mei/([^/]+)$")] == "public"
+    assert after[("GET", f"{v1}/drafts$")] == WRITE_ACTION
+    assert after[("PUT", f"{v1}/([^/]+)$")] == WRITE_ACTION
+    assert after[("GET", f"{v1}/([^/]+)/propostas$")] == CITIZEN_ACTION
+
+
 def test_apply_is_idempotent_and_leaves_other_mappings_alone(
     staging_like, engine, service, capsys
 ):
@@ -355,7 +409,7 @@ def test_apply_is_idempotent_and_leaves_other_mappings_alone(
     capsys.readouterr()
     assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_OK
     out = capsys.readouterr().out
-    assert "0 to create, 0 to update, 0 to delete, 25 unchanged" in out
+    assert "0 to create, 0 to update, 0 to delete, 27 unchanged" in out
     assert "No changes to apply." in out
     assert db.query(Endpoint).count() == count
 
@@ -366,7 +420,7 @@ def test_plan_command_never_writes(staging_like, engine, service, capsys):
     assert run("plan", str(REPO_FILE), db, engine, service) == EXIT_OK
     assert _actions_by_key(db) == before
     out = capsys.readouterr().out
-    assert "14 to create, 12 to update, 0 to delete" in out
+    assert "16 to create, 12 to update, 0 to delete" in out
     assert "Dry run (plan): nothing was written." in out
     service.redis_mapping_service.store_mapping.assert_not_called()
 
