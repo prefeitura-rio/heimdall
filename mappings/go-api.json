@@ -201,6 +201,20 @@
     },
     {
       "method": "GET",
+      "path": "/go/api/public/courses",
+      "action": "public",
+      "description": "Lista o catálogo público de cursos do cidadão (leitura pública)",
+      "source": "DEV-705"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/public/courses/{id}",
+      "action": "public",
+      "description": "Busca um curso do catálogo público do cidadão (leitura pública)",
+      "source": "DEV-705"
+    },
+    {
+      "method": "GET",
       "path": "/go/api/public/oportunidades-mei",
       "action": "public",
       "description": "Lista as oportunidades MEI publicadas (leitura pública; rascunhos ficam com a gestão MEI)",
