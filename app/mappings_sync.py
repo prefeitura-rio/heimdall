@@ -53,6 +53,7 @@ from pydantic import (
 from sqlalchemy import Engine, text
 
 from app.models import Action, Endpoint, User
+from app.services.path_pattern import convert_pattern_to_regex
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -255,10 +256,25 @@ def sample_path(path: str) -> str:
 
 
 def _matches(pattern: str, path: str) -> bool:
-    # The ext_authz (Go regexp.MatchString) searches the pattern anywhere in the
-    # path; re.search reproduces that, so a pattern without "^" counts too.
+    # Substring match on the raw pattern (Go regexp.MatchString, the edge rule
+    # before DEV-680). Only resolves same_as references, so their resolution
+    # stays as it was; the shadowing check uses _wins_at_edge.
     try:
         return re.search(pattern, path) is not None
+    except re.error:
+        return False
+
+
+def _wins_at_edge(pattern: str, path: str) -> bool:
+    """
+    Whether a stored pattern resolves the path at the edge today.
+
+    Since DEV-680 Redis holds the anchored regex of each pattern (the database
+    rule) and the ext_authz matches that one, so a pattern without "$" no longer
+    covers longer paths sharing its prefix and cannot shadow them.
+    """
+    try:
+        return re.search(convert_pattern_to_regex(pattern), path) is not None
     except re.error:
         return False
 
@@ -438,7 +454,9 @@ def build_plan(db: Session, spec: MappingFile) -> Plan:
         for other in existing:
             if other.method != entry.method or other.path_pattern in (pattern, alias):
                 continue
-            if other.action_name != desired and _matches(other.path_pattern, sample):
+            if other.action_name != desired and _wins_at_edge(
+                other.path_pattern, sample
+            ):
                 plan.errors.append(
                     f"{route}: pattern {other.path_pattern!r} (id {other.id}) of another "
                     f"route also matches it with action {other.action_name!r} and can "
