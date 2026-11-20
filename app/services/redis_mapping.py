@@ -11,6 +11,7 @@ from typing import Any
 import redis
 
 from app.services.base import BaseService
+from app.services.path_pattern import convert_pattern_to_regex
 from app.settings import settings
 
 
@@ -184,8 +185,10 @@ class RedisMappingService(BaseService):
                         continue
 
                     try:
-                        # Test if request path matches the pattern
-                        if re.match(path_pattern, path):
+                        # Match by the same anchored rule as the database
+                        # fallback (DEV-680): the raw pattern has no end anchor
+                        # and would match any longer path by prefix.
+                        if re.match(convert_pattern_to_regex(path_pattern), path):
                             span.set_attribute("redis_mapping.matched_pattern", path_pattern)
                             span.set_attribute("redis_mapping.mapping_id", mapping_id)
 
