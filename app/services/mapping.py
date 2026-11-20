@@ -16,6 +16,7 @@ from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
+from app.services.path_pattern import convert_pattern_to_regex
 from app.services.redis_mapping import RedisMappingService
 from app.tracing import subject_kind
 
@@ -559,46 +560,12 @@ class MappingService(BaseService):
 
     def _convert_pattern_to_regex(self, path_pattern: str) -> str:
         """
-        Convert a simple path pattern to a full regex pattern.
-        Supports:
-        - * for any characters within a path segment
-        - ** for any path segments
-        - Raw regex patterns with parentheses for capture groups
-        Named ":param" segments are not supported (DEV-186): creation and
-        update refuse them (see _has_named_param_segment).
+        Convert a path pattern to the anchored regex it is matched with.
+
+        Delegates to app.services.path_pattern.convert_pattern_to_regex, the
+        rule the Redis fast path also uses (DEV-680).
         """
-        # Check if this looks like a raw regex pattern (contains unescaped parentheses)
-        if '(' in path_pattern and ')' in path_pattern:
-            # Treat as raw regex, just ensure anchors
-            pattern = path_pattern
-            if not pattern.startswith("^"):
-                pattern = "^" + pattern
-            if not pattern.endswith("$"):
-                pattern = pattern + "$"
-            return pattern
-
-        # A leading "^" and a trailing "$" are regex anchors, not literal path
-        # characters: scripts/manage_openapi_mappings.py stores routes without
-        # {param} as "<path>$", and the Redis fast path matches that raw pattern.
-        # Strip them before escaping so they are not turned into "\^" / "\$".
-        body = path_pattern
-        if body.startswith("^"):
-            body = body[1:]
-        if body.endswith("$") and not body.endswith("\\$"):
-            body = body[:-1]
-
-        # Escape special regex characters
-        pattern = re.escape(body)
-
-        # Handle ** for multiple path segments
-        pattern = pattern.replace(r"\*\*", ".*")
-
-        # Handle * for single path segment
-        pattern = pattern.replace(r"\*", "[^/]*")
-
-        # Ensure exact match. The anchors were stripped above, so a "\$" left at
-        # the end is an escaped literal and must not count as an anchor.
-        return "^" + pattern + "$"
+        return convert_pattern_to_regex(path_pattern)
 
     def sync_all_mappings_to_redis(self, db: Session) -> bool:
         """
