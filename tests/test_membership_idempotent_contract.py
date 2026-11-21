@@ -55,6 +55,17 @@ def test_openapi_documents_idempotent_success_without_400(path, method, success)
     assert "not a member of this group" not in documented
 
 
+def test_openapi_delete_does_not_promise_404_for_unknown_group():
+    """DEV-635: removing from a group that does not exist answers 204, not 404."""
+    operation = _openapi()["paths"][MEMBER_PATH]["delete"]
+
+    assert "404" not in operation["responses"]
+    assert "not found" not in repr(operation["responses"]).lower()
+    success = operation["responses"]["204"]["description"].lower()
+    assert "group does not exist" in success
+    assert "does not exist" in operation["description"]
+
+
 @pytest.fixture
 def db():
     engine = create_engine(
@@ -88,14 +99,14 @@ def _membership_service() -> MembershipService:
     return service
 
 
-def _remove(db, service):
+def _remove(db, service, group_name="eng:backend"):
     current_user = db.query(User).filter(User.subject == CALLER).one()
     user_service = MagicMock()
     user_service.get_user_roles.return_value = ["some_role"]
     with patch("app.services.policy_invalidator.invalidate_policy_version"):
         return asyncio.run(
             remove_member_from_group(
-                group_name="eng:backend",
+                group_name=group_name,
                 subject=TARGET,
                 current_user=current_user,
                 db=db,
@@ -134,3 +145,17 @@ def test_removing_the_same_member_twice_is_idempotent(db):
         .count()
     )
     assert removed == 1
+
+
+def test_removing_from_an_unknown_group_succeeds_without_changes(db):
+    """DEV-635: the documented contract is 204 for a group that does not exist."""
+    service = _membership_service()
+
+    assert _remove(db, service, group_name="nao-existe") is None  # 204 No Content
+
+    assert db.query(Group).filter(Group.name == "nao-existe").count() == 0
+    assert db.query(Membership).count() == 0
+    service.cerbos_service.check_permission.assert_called_once()
+    service.cerbos_service.push_user_policy.assert_not_called()
+    service.cerbos_service.delete_user_policy.assert_not_called()
+    service.cache_service.invalidate_user_roles_cache.assert_not_called()
