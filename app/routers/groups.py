@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.common.authz import forbidden
+from app.common.authz import forbidden, require_admin_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
@@ -241,7 +241,8 @@ List all groups in the system with optional filtering.
 **Filtering**: Use the `prefix` query parameter to filter groups by name prefix.
 
 **Authorization**: Requires admin privileges to list groups. The authorization
-gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:group:list` permission is checked in Cerbos before any read.
 
 **Performance**: Results are cached for optimal performance. Large result sets
 may be paginated in future versions.
@@ -308,10 +309,22 @@ async def list_groups(
             example="eng"
         )
     ] = None,
-    _current_user: Annotated[User, Depends(get_current_user)] = None,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[Session, Depends(get_db)] = None,
     group_service: Annotated[GroupService, Depends(lambda: GroupService())] = None,
+    user_service: Annotated[UserService, Depends(lambda: UserService())] = None,
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())] = None,
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="group:list",
+        resource_type="group",
+        operation="list_groups",
+        detail="Permission denied to list groups",
+    )
     groups = group_service.list_groups(db=db, prefix=prefix)
 
     return [

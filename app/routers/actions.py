@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.common.authz import forbidden
+from app.common.authz import forbidden, require_admin_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.logging_config import get_structured_logger
@@ -357,7 +357,8 @@ async def create_action(
 Retrieve a paginated list of all actions available in the system.
 
 **Authorization**: Requires admin privileges to list actions. The authorization
-gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:action:list` permission is checked in Cerbos before any read.
 
 **Pagination**: Use `skip` and `limit` parameters to control pagination.
 Maximum limit is 100 actions per request.
@@ -442,12 +443,24 @@ number of API endpoints currently mapped to it.
     }
 )
 async def list_actions(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     action_service: Annotated[ActionService, Depends(get_action_service)],
+    user_service: Annotated[UserService, Depends(get_user_service)],
+    cerbos_service: Annotated[CerbosService, Depends(get_cerbos_service)],
     skip: Annotated[int, Query(ge=0, description="Number of actions to skip (pagination offset)", example=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of actions to return", example=50)] = 50,
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="action:list",
+        resource_type="action",
+        operation="list_actions",
+        detail="Permission denied to list actions",
+    )
     try:
         actions = action_service.list_actions(db=db, skip=skip, limit=limit)
 
@@ -490,7 +503,8 @@ async def list_actions(
 Retrieve detailed information about a specific action by its ID.
 
 **Authorization**: Requires admin privileges to read actions. The authorization
-gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:action:read` permission is checked in Cerbos before any read.
 
 **Action Details**: Returns the action's name, description, and number of
 API endpoints currently mapped to this action.
@@ -552,10 +566,25 @@ API endpoints currently mapped to this action.
 )
 async def get_action(
     action_id: int,
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     action_service: Annotated[ActionService, Depends(get_action_service)],
+    user_service: Annotated[UserService, Depends(get_user_service)],
+    cerbos_service: Annotated[CerbosService, Depends(get_cerbos_service)],
 ):
+    # Authorize before the lookup: a denied caller cannot probe which ids exist
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="action:read",
+        resource_type="action",
+        operation="get_action",
+        detail="Permission denied to view actions",
+        resource_attrs={"id": str(action_id)},
+        target_id=str(action_id),
+    )
     try:
         action = action_service.get_action(db=db, action_id=action_id)
 

@@ -138,9 +138,11 @@ def _create_action() -> Any:
 
 def _list_actions() -> Any:
     return actions_router.list_actions(
-        _current_user=_user(),
+        current_user=_user(),
         db=MagicMock(),
         action_service=_action_service("list_actions"),
+        user_service=_user_service(),
+        cerbos_service=_cerbos_allowing(),
         skip=0,
         limit=50,
     )
@@ -149,9 +151,11 @@ def _list_actions() -> Any:
 def _get_action() -> Any:
     return actions_router.get_action(
         action_id=1,
-        _current_user=_user(),
+        current_user=_user(),
         db=MagicMock(),
         action_service=_action_service("get_action"),
+        user_service=_user_service(),
+        cerbos_service=_cerbos_allowing(),
     )
 
 
@@ -310,6 +314,8 @@ def test_database_failure_over_http_has_no_driver_message_in_body(
         app.dependency_overrides[actions_router.get_action_service] = lambda: (
             _action_service("list_actions")
         )
+        app.dependency_overrides[actions_router.get_cerbos_service] = _cerbos_allowing
+        app.dependency_overrides[actions_router.get_user_service] = _user_service
         expected = "Failed to list actions"
     else:
         route = next(

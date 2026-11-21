@@ -15,6 +15,67 @@ from app.services.base import BaseService
 from app.settings import settings
 from app.tracing import redact_cpf, subject_kind
 
+# Reserved namespace of Heimdall's own administrative actions (DEV-556).
+# Application roles use free-form action names shared with the route
+# mappings, so an app action could be called "user:list" or "group:create".
+# The admin routes therefore check "heimdall:<action>" instead, and the
+# principal policy grants that namespace only on the admin resources.
+ADMIN_ACTION_PREFIX = "heimdall:"
+
+# Resource kinds the admin routes check. None of the applications that
+# check Cerbos uses them (ext-authz: "generic"; go-api: "proposta",
+# "oportunidade", "document", "resource"...).
+ADMIN_RESOURCE_TYPES: tuple[str, ...] = (
+    "group",
+    "user",
+    "role",
+    "action",
+    "mapping",
+    "membership",
+)
+
+# Every administrative action an admin route checks, without the prefix.
+# This is also the list the startup backfill (app/services/admin_actions.py)
+# migrates from the legacy un-prefixed names.
+ADMIN_ACTIONS: tuple[str, ...] = (
+    "action:create",
+    "action:delete",
+    "action:list",
+    "action:read",
+    "action:update",
+    "group:add_member",
+    "group:assign_role",
+    "group:create",
+    "group:delete",
+    "group:list",
+    "group:remove_member",
+    "group:remove_role",
+    "group:view_members",
+    "group:view_roles",
+    "mapping:create",
+    "mapping:delete",
+    "mapping:list",
+    "mapping:update",
+    "role:create",
+    "role:delete",
+    "role:list",
+    "role:modify_actions",
+    "role:view_actions",
+    "user:list",
+)
+
+
+def admin_action(name: str) -> str:
+    """Name an admin route checks in Cerbos for the admin action `name`."""
+    if name not in ADMIN_ACTIONS:
+        raise ValueError(f"Unknown admin action: {name}")
+    return f"{ADMIN_ACTION_PREFIX}{name}"
+
+
+def is_admin_action(name: str) -> bool:
+    """Whether an action name belongs to the reserved admin namespace."""
+    return name.startswith(ADMIN_ACTION_PREFIX)
+
 
 class CerbosService(BaseService):
     """Service for Cerbos API interactions with distributed tracing."""
@@ -217,7 +278,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:create",
+            action=admin_action("group:create"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -229,7 +290,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:delete",
+            action=admin_action("group:delete"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -241,7 +302,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:add_member",
+            action=admin_action("group:add_member"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -253,7 +314,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:remove_member",
+            action=admin_action("group:remove_member"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -265,7 +326,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:assign_role",
+            action=admin_action("group:assign_role"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -277,7 +338,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:remove_role",
+            action=admin_action("group:remove_role"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -289,7 +350,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="role:create",
+            action=admin_action("role:create"),
             resource_type="role",
             resource_attrs={"name": role_name},
         )
@@ -301,7 +362,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="mapping:create",
+            action=admin_action("mapping:create"),
             resource_type="mapping",
             resource_attrs={"action": action_name},
         )
@@ -313,7 +374,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="mapping:update",
+            action=admin_action("mapping:update"),
             resource_type="mapping",
             resource_attrs={"id": str(mapping_id)},
         )
@@ -325,7 +386,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="mapping:delete",
+            action=admin_action("mapping:delete"),
             resource_type="mapping",
             resource_attrs={"id": str(mapping_id)},
         )
@@ -337,7 +398,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="action:create",
+            action=admin_action("action:create"),
             resource_type="action",
             resource_attrs={"name": action_name},
         )
@@ -349,7 +410,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="action:update",
+            action=admin_action("action:update"),
             resource_type="action",
             resource_attrs={"id": str(action_id)},
         )
@@ -361,7 +422,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="action:delete",
+            action=admin_action("action:delete"),
             resource_type="action",
             resource_attrs={"id": str(action_id)},
         )
@@ -383,10 +444,10 @@ class CerbosService(BaseService):
 
         # Check if user has superadmin role - if so, grant everything
         if "superadmin" in user_roles:
-            action_rules = [
+            rules = [
                 {
-                    "action": "*",
-                    "effect": "EFFECT_ALLOW"
+                    "resource": "*",
+                    "actions": [{"action": "*", "effect": "EFFECT_ALLOW"}],
                 }
             ]
         else:
@@ -407,38 +468,51 @@ class CerbosService(BaseService):
             finally:
                 session.close()
 
-            # Convert actions to Cerbos rule format
-            if all_actions:
-                action_rules = [
-                    {
-                        "action": action_name,
-                        "effect": "EFFECT_ALLOW"
-                    }
-                    for action_name in sorted(all_actions)
-                ]
-            else:
-                # If no actions assigned, deny everything
-                action_rules = [
-                    {
-                        "action": "*",
-                        "effect": "EFFECT_DENY"
-                    }
-                ]
+            rules = self._role_action_rules(all_actions)
 
         return {
             "apiVersion": "api.cerbos.dev/v1",
             "principalPolicy": {
                 "principal": user_subject,
                 "version": "default",
-                "rules": [
-                    {
-                        "resource": "*",
-                        "actions": action_rules
-                    }
-                ]
+                "rules": rules,
             },
             "metadata": {"storeIdentifier": policy_id},
         }
+
+    @staticmethod
+    def _role_action_rules(action_names: set[str]) -> list[dict[str, Any]]:
+        """
+        Principal policy rules for the actions of a non-superadmin user (DEV-556).
+
+        Every action of the user is allowed on every resource, but on the
+        admin resources only the reserved "heimdall:" actions stay allowed:
+        the application actions are explicitly denied there (Cerbos: DENY wins
+        over the ALLOW of the "*" rule). "heimdall:" actions stay allowed on
+        "*" so the gateway (ext_authz, kind "generic") can map Heimdall's own
+        routes to them.
+        """
+        if not action_names:
+            return [{"resource": "*", "actions": [{"action": "*", "effect": "EFFECT_DENY"}]}]
+
+        rules: list[dict[str, Any]] = [
+            {
+                "resource": "*",
+                "actions": [
+                    {"action": name, "effect": "EFFECT_ALLOW"} for name in sorted(action_names)
+                ],
+            }
+        ]
+        app_actions = sorted(name for name in action_names if not is_admin_action(name))
+        if app_actions:
+            rules.extend(
+                {
+                    "resource": resource_type,
+                    "actions": [{"action": name, "effect": "EFFECT_DENY"} for name in app_actions],
+                }
+                for resource_type in ADMIN_RESOURCE_TYPES
+            )
+        return rules
 
     def push_user_policy(self, user_subject: str, user_roles: list[str]) -> bool:
         """

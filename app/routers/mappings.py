@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.common.authz import forbidden
+from app.common.authz import forbidden, require_admin_permission
 from app.database import get_db
 from app.dependencies import get_api_user, get_current_user
 from app.exceptions import MappingAlreadyExistsError
@@ -736,7 +736,8 @@ async def delete_mapping(
 Retrieve a list of all endpoint-to-action mappings with optional filtering.
 
 **Authorization**: Requires admin privileges to list mappings. The authorization
-gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:mapping:list` permission is checked in Cerbos before any read.
 
 **Filtering**: Use the action_filter parameter to show only mappings for
 a specific action (exact match on action name).
@@ -807,13 +808,25 @@ interfaces and configuration management tools.
     }
 )
 async def list_mappings(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     mapping_service: Annotated[MappingService, Depends(lambda: MappingService())],
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
     action_filter: Annotated[
         str | None, Query(description="Filter mappings by specific action name (exact match)", example="user:read")
     ] = None,
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="mapping:list",
+        resource_type="mapping",
+        operation="list_mappings",
+        detail="Permission denied to list mappings",
+    )
     mappings = mapping_service.list_mappings(db=db, action_filter=action_filter)
 
     return [

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.common.authz import forbidden
+from app.common.authz import forbidden, require_admin_permission
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -17,7 +17,7 @@ from app.exceptions import GroupNotFoundError
 from app.logging_config import get_structured_logger
 from app.models import User
 from app.services.action import ActionService
-from app.services.cerbos import CerbosService
+from app.services.cerbos import CerbosService, admin_action
 from app.services.role import RoleService
 from app.services.user import UserService
 
@@ -201,7 +201,7 @@ async def create_role(
     """
     Create a role.
     Implements POST /roles as specified in SPEC.md Section 3.4.
-    Authorization is decided by Cerbos (action `role:create` on resource `role`).
+    Authorization is decided by Cerbos (action `heimdall:role:create` on resource `role`).
     """
     # Get caller's roles for Cerbos permission check
     caller_roles = user_service.get_user_roles(db, current_user)
@@ -257,7 +257,8 @@ async def create_role(
 List all roles available in the system.
 
 **Authorization**: Requires admin privileges to list roles. The authorization
-gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403.
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:role:list` permission is checked in Cerbos before any read.
 
 **Pagination**: Use `skip` and `limit` parameters to control pagination.
 Maximum limit is 100 roles per request.
@@ -324,14 +325,26 @@ Maximum limit is 100 roles per request.
     },
 )
 async def list_roles(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     role_service: Annotated[RoleService, Depends(lambda: RoleService())],
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
     skip: int = Query(0, ge=0, description="Number of items to skip"),
     limit: int = Query(
         50, ge=1, le=100, description="Maximum number of items to return"
     ),
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="role:list",
+        resource_type="role",
+        operation="list_roles",
+        detail="Permission denied to list roles",
+    )
     roles, total_count = role_service.list_roles(db=db, skip=skip, limit=limit)
 
     role_responses = [
@@ -448,7 +461,7 @@ async def list_group_roles(
     can_view = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="group:view_roles",
+        action=admin_action("group:view_roles"),
         resource_type="group",
         resource_attrs={"name": group_name},
     )
@@ -645,7 +658,7 @@ Permissions are checked via Cerbos policies.
                         },
                         {
                             "id": 2,
-                            "name": "user:list",
+                            "name": "heimdall:user:list",
                             "description": "List users in the system",
                         },
                     ]
@@ -707,7 +720,7 @@ async def list_role_actions(
     can_view = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:view_actions",
+        action=admin_action("role:view_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
@@ -866,7 +879,7 @@ async def assign_action_to_role(
     can_modify = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:modify_actions",
+        action=admin_action("role:modify_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
@@ -1036,7 +1049,7 @@ async def remove_action_from_role(
     can_modify = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:modify_actions",
+        action=admin_action("role:modify_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
@@ -1193,7 +1206,7 @@ async def delete_role(
         is_allowed = cerbos_service.check_permission(
             caller_subject=current_user.subject,
             caller_roles=caller_roles,
-            action="role:delete",
+            action=admin_action("role:delete"),
             resource_type="role",
             resource_attrs={"name": role_name},
         )
@@ -1210,7 +1223,7 @@ async def delete_role(
             )
 
         # Check if role exists only after authorization, so a caller without
-        # role:delete cannot tell existing roles from missing ones (403 for both)
+        # heimdall:role:delete cannot tell existing roles from missing ones (403 for both)
         role = role_service.get_role_by_name(db, role_name)
         if not role:
             raise HTTPException(
