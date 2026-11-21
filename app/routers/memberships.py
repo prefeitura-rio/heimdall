@@ -405,11 +405,13 @@ they inherited through that group membership.
 immediate effect of permission changes.
 
 **Idempotency**: Removing a user who is not (or is no longer) a member of the
-group is not an error: the call returns 204 and nothing changes.
+group is not an error: the call returns 204 and nothing changes. The same holds
+when the group does not exist: there is no membership to remove, so the call
+also returns 204 and nothing changes.
     """,
     responses={
         204: {
-            "description": "Member removed from group successfully, or was not a member (idempotent)"
+            "description": "Member removed from group successfully, or was not a member, or the group does not exist (idempotent)"
         },
         401: {
             "description": "Unauthorized - Invalid or missing JWT token",
@@ -427,16 +429,6 @@ group is not an error: the call returns 204 and nothing changes.
                 "application/json": {
                     "example": {
                         "detail": "Permission denied to remove member from group 'engineering_team:backend'"
-                    }
-                }
-            }
-        },
-        404: {
-            "description": "Group or user not found",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Group 'unknown-group' not found"
                     }
                 }
             }
