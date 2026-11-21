@@ -57,6 +57,21 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+        - name: mappings-sync-app-rmi
+          image: ghcr.io/prefeitura-rio/heimdall:latest
+          workingDir: /app
+          command: ["uv", "run", "python", "-m", "app.mappings_sync", "apply", "--file", "mappings/app-rmi.json"]
+          envFrom:
+            - secretRef:
+                name: heimdall-admin-secrets
+          resources:
+            requests:
+              ephemeral-storage: 50Mi
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       containers:
         - name: heimdall-admin
           image: ghcr.io/prefeitura-rio/heimdall:latest

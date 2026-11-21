@@ -1,6 +1,7 @@
 """Tests for the versioned endpoint-to-action mappings (DEV-650)."""
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -24,6 +25,7 @@ from app.mappings_sync import (
 )
 from app.models import Action, Endpoint, User
 from app.services.mapping import MappingService
+from app.services.path_pattern import convert_pattern_to_regex
 from app.tracing import setup_tracing
 
 REPO_FILE = Path(__file__).resolve().parent.parent / "mappings" / "go-api.json"
@@ -655,3 +657,239 @@ def test_invalid_files_are_refused(tmp_path, overrides, reason, db, engine, serv
     with pytest.raises(ValueError, match=reason):
         load_mapping_file(spec_file)
     assert run("apply", str(spec_file), db, engine, service) == EXIT_INVALID_FILE
+
+
+# ============================================================================
+# app-rmi: mobility routes (DEV-734)
+# ============================================================================
+
+RMI_FILE = REPO_FILE.parent / "app-rmi.json"
+STAGING_MANIFEST = REPO_FILE.parent.parent / "k8s" / "staging" / "resources.yaml"
+RMI = "/rmi/v1"
+# Synthetic stand-ins for the actions the staging database gives today to the
+# routes the file references; "authenticated" is real (cerbos-ext-authz).
+RMI_CITIZEN_ACTION = "synthetic:rmi:citizen"
+RMI_ADMIN_ACTIONS = {
+    "GET": "synthetic:rmi:admin:read",
+    "POST": "synthetic:rmi:admin:create",
+    "PUT": "synthetic:rmi:admin:update",
+    "DELETE": "synthetic:rmi:admin:delete",
+}
+
+RMI_CITIZEN_ROUTES = {
+    ("GET", f"{RMI}/citizen/{{cpf}}/vehicles"),
+    ("POST", f"{RMI}/citizen/{{cpf}}/vehicles"),
+    ("GET", f"{RMI}/citizen/{{cpf}}/vehicles/{{vehicle_id}}"),
+    ("PATCH", f"{RMI}/citizen/{{cpf}}/vehicles/{{vehicle_id}}"),
+    ("DELETE", f"{RMI}/citizen/{{cpf}}/vehicles/{{vehicle_id}}"),
+    ("GET", f"{RMI}/citizen/{{cpf}}/vehicle-invitations"),
+    ("PATCH", f"{RMI}/citizen/{{cpf}}/vehicle-invitations/{{conductor_id}}"),
+    ("GET", f"{RMI}/citizen/{{cpf}}/vehicles/{{vehicle_id}}/conductors"),
+    ("POST", f"{RMI}/citizen/{{cpf}}/vehicles/{{vehicle_id}}/conductors"),
+    (
+        "DELETE",
+        f"{RMI}/citizen/{{cpf}}/vehicles/{{vehicle_id}}/conductors/{{conductor_id}}",
+    ),
+}
+RMI_CATALOG_ROUTES = {
+    ("GET", f"{RMI}/mobilidade/vehicle-brands"),
+    ("GET", f"{RMI}/mobilidade/vehicle-models"),
+    ("GET", f"{RMI}/mobilidade/vehicle-colors"),
+}
+# Admin route -> the /admin/beta/groups route of the same verb it follows.
+RMI_ADMIN_ROUTES = {
+    ("GET", f"{RMI}/admin/mobilidade/vehicle-brands"): ("GET", "/admin/beta/groups"),
+    ("POST", f"{RMI}/admin/mobilidade/vehicle-brands"): (
+        "POST",
+        "/admin/beta/groups",
+    ),
+    ("PATCH", f"{RMI}/admin/mobilidade/vehicle-brands/{{brand_id}}"): (
+        "PUT",
+        "/admin/beta/groups/{group_id}",
+    ),
+    ("DELETE", f"{RMI}/admin/mobilidade/vehicle-brands/{{brand_id}}"): (
+        "DELETE",
+        "/admin/beta/groups/{group_id}",
+    ),
+    ("GET", f"{RMI}/admin/mobilidade/vehicle-models"): ("GET", "/admin/beta/groups"),
+    ("POST", f"{RMI}/admin/mobilidade/vehicle-models"): (
+        "POST",
+        "/admin/beta/groups",
+    ),
+    ("PATCH", f"{RMI}/admin/mobilidade/vehicle-models/{{model_id}}"): (
+        "PUT",
+        "/admin/beta/groups/{group_id}",
+    ),
+    ("DELETE", f"{RMI}/admin/mobilidade/vehicle-models/{{model_id}}"): (
+        "DELETE",
+        "/admin/beta/groups/{group_id}",
+    ),
+}
+
+
+def _expected_rmi_action(method, path):
+    if (method, path) in RMI_CITIZEN_ROUTES:
+        return RMI_CITIZEN_ACTION
+    if (method, path) in RMI_CATALOG_ROUTES:
+        return "authenticated"
+    return RMI_ADMIN_ACTIONS[RMI_ADMIN_ROUTES[(method, path)][0]]
+
+
+def _resolves_at_edge(db, method, path):
+    """Actions of the stored patterns the edge (anchored regex) matches."""
+    return {
+        e.action.name
+        for e in db.query(Endpoint).filter(Endpoint.method == method).all()
+        if re.search(convert_pattern_to_regex(e.path_pattern), path)
+    }
+
+
+@pytest.fixture
+def rmi_staging_like(db):
+    """
+    The RMI as staging has it: the sibling citizen and admin routes mapped (with
+    and without /rmi/v1, as the OpenAPI tool creates them), mobility unmapped.
+    """
+    for name in (
+        "public",
+        "authenticated",
+        RMI_CITIZEN_ACTION,
+        OTHER_ACTION,
+        *RMI_ADMIN_ACTIONS.values(),
+    ):
+        _action(db, name)
+    for prefix in (RMI, ""):
+        _mapping(db, "GET", f"{prefix}/citizen/([^/]+)/pets$", RMI_CITIZEN_ACTION)
+        _mapping(db, "POST", f"{prefix}/citizen/([^/]+)/pets$", RMI_CITIZEN_ACTION)
+        _mapping(
+            db, "GET", f"{prefix}/citizen/([^/]+)/pets/([^/]+)$", RMI_CITIZEN_ACTION
+        )
+        _mapping(db, "GET", f"{prefix}/citizen/([^/]+)/avatar$", RMI_CITIZEN_ACTION)
+        _mapping(db, "GET", f"{prefix}/admin/beta/groups$", RMI_ADMIN_ACTIONS["GET"])
+        _mapping(db, "POST", f"{prefix}/admin/beta/groups$", RMI_ADMIN_ACTIONS["POST"])
+        for verb in ("GET", "PUT", "DELETE"):
+            _mapping(
+                db,
+                verb,
+                f"{prefix}/admin/beta/groups/([^/]+)$",
+                RMI_ADMIN_ACTIONS[verb],
+            )
+    _mapping(db, "GET", f"{RMI}/citizen/([^/]+)$", OTHER_ACTION)
+    # A mapping of another application, never to be touched.
+    _mapping(db, "GET", "/go/api/v1/categorias$", "public")
+    return db
+
+
+def test_app_rmi_file_maps_the_mobility_routes_of_the_issue():
+    spec = load_mapping_file(RMI_FILE)
+    assert spec.application == "app-rmi"
+    assert spec.path_prefix == "/rmi/v1/"
+    assert spec.remove == []
+    entries = {(e.method, e.path): e for e in spec.mappings}
+    assert set(entries) == (
+        RMI_CITIZEN_ROUTES | RMI_CATALOG_ROUTES | set(RMI_ADMIN_ROUTES)
+    )
+    assert len(spec.mappings) == 21
+
+    for key in RMI_CITIZEN_ROUTES:
+        ref = entries[key].same_as
+        assert ref is not None, key
+        assert (ref.method, ref.path) == ("GET", f"{RMI}/citizen/{{cpf}}/pets")
+    for key in RMI_CATALOG_ROUTES:
+        assert entries[key].action == "authenticated"
+    for key, (verb, path) in RMI_ADMIN_ROUTES.items():
+        ref = entries[key].same_as
+        assert ref is not None, key
+        assert (ref.method, ref.path) == (verb, f"{RMI}{path}")
+    # Nothing public: every mobility route needs at least a valid JWT.
+    assert all(e.action != "public" for e in spec.mappings)
+    assert {e.source for e in spec.mappings} == {"DEV-734"}
+
+
+def test_plan_on_rmi_staging_like_db_creates_the_mobility_mappings(
+    rmi_staging_like,
+):
+    db = rmi_staging_like
+    before = _actions_by_key(db)
+    plan = build_plan(db, load_mapping_file(RMI_FILE))
+
+    assert plan.errors == []
+    assert _actions_by_key(db) == before  # plan never writes
+    assert {c.kind for c in plan.changes} == {ChangeKind.CREATE}
+    created = {(c.method, c.path_pattern): c.action_name for c in plan.changes}
+    spec = load_mapping_file(RMI_FILE)
+    assert created == {
+        (e.method, route_pattern(e.path)): _expected_rmi_action(e.method, e.path)
+        for e in spec.mappings
+    }
+
+
+def test_apply_makes_the_mobility_routes_resolve_at_the_edge(
+    rmi_staging_like, engine, service, capsys
+):
+    db = rmi_staging_like
+    cpf = "00000000000"
+    vehicles = f"{RMI}/citizen/{cpf}/vehicles"
+    invitations = f"{RMI}/citizen/{cpf}/vehicle-invitations"
+    # The issue: no stored pattern resolves them (no action mapping).
+    assert _resolves_at_edge(db, "GET", vehicles) == set()
+    assert _resolves_at_edge(db, "GET", invitations) == set()
+    before = _actions_by_key(db)
+
+    assert run("apply", str(RMI_FILE), db, engine, service) == EXIT_OK
+    assert _resolves_at_edge(db, "GET", vehicles) == {RMI_CITIZEN_ACTION}
+    assert _resolves_at_edge(db, "GET", invitations) == {RMI_CITIZEN_ACTION}
+    assert _resolves_at_edge(db, "DELETE", f"{vehicles}/v1/conductors/c1") == {
+        RMI_CITIZEN_ACTION
+    }
+    assert _resolves_at_edge(db, "GET", f"{RMI}/mobilidade/vehicle-colors") == {
+        "authenticated"
+    }
+    assert _resolves_at_edge(
+        db, "PATCH", f"{RMI}/admin/mobilidade/vehicle-models/m1"
+    ) == {RMI_ADMIN_ACTIONS["PUT"]}
+    # Each admin verb follows the beta-groups route of the same verb.
+    assert _resolves_at_edge(db, "POST", f"{RMI}/admin/mobilidade/vehicle-brands") == {
+        RMI_ADMIN_ACTIONS["POST"]
+    }
+
+    after = _actions_by_key(db)
+    assert {k: v for k, v in after.items() if k in before} == before  # untouched
+    assert len(after) == len(before) + 21
+
+    capsys.readouterr()
+    assert run("apply", str(RMI_FILE), db, engine, service) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "0 to create, 0 to update, 0 to delete, 21 unchanged" in out
+    assert "No changes to apply." in out
+
+
+def test_app_rmi_alias_without_prefix_follows_the_declared_action(rmi_staging_like):
+    db = rmi_staging_like
+    # The OpenAPI tool may have created the route without /rmi/v1 already.
+    alias = _mapping(db, "GET", "/citizen/([^/]+)/vehicles$", OTHER_ACTION)
+    plan = build_plan(db, load_mapping_file(RMI_FILE))
+    assert plan.errors == []
+    updates = [c for c in plan.changes if c.kind == ChangeKind.UPDATE]
+    assert [(u.mapping_id, u.old_action_name, u.action_name) for u in updates] == [
+        (alias.id, OTHER_ACTION, RMI_CITIZEN_ACTION)
+    ]
+
+
+def test_app_rmi_without_the_referenced_route_aborts_before_any_write(
+    db, engine, service
+):
+    # A database where GET /citizen/{cpf}/pets has no mapping: nothing applied.
+    for name in ("authenticated", *RMI_ADMIN_ACTIONS.values()):
+        _action(db, name)
+    assert run("apply", str(RMI_FILE), db, engine, service) == EXIT_PLAN_ERRORS
+    assert db.query(Endpoint).count() == 0
+
+
+def test_every_versioned_mapping_file_is_applied_on_the_staging_deploy():
+    manifest = STAGING_MANIFEST.read_text(encoding="utf-8")
+    for spec_file in sorted(REPO_FILE.parent.glob("*.json")):
+        expected = (
+            f'"app.mappings_sync", "apply", "--file", "mappings/{spec_file.name}"'
+        )
+        assert expected in manifest, spec_file.name

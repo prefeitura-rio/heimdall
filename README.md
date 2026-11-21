@@ -280,7 +280,8 @@ The background service runs automated maintenance tasks:
 
 The endpoint-to-action mappings of an application can be versioned in this
 repository instead of being created by hand through the admin API. Today the
-go-api has one: [`mappings/go-api.json`](mappings/go-api.json).
+go-api ([`mappings/go-api.json`](mappings/go-api.json)) and the app-rmi
+([`mappings/app-rmi.json`](mappings/app-rmi.json), prefix `/rmi/v1/`) have one.
 
 ### File format
 - `path_prefix`: every route of the file must start with it (`/go/` for the go-api).
@@ -318,6 +319,8 @@ The `mappings-sync` initContainer of `heimdall-admin` (`k8s/staging`) runs
 `apply` after the migrations on every rollout, so a merge to `staging` that
 changes the file is applied by the normal deploy. Its output is the plan and
 the result: `kubectl -n heimdall logs deploy/heimdall-admin -c mappings-sync`.
+`mappings/app-rmi.json` is applied the same way by the next initContainer,
+`mappings-sync-app-rmi` (`-c mappings-sync-app-rmi` for its log).
 If it fails, the new pods stay in `Init` and the previous ones keep serving.
 
 ### Production
