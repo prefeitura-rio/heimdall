@@ -85,6 +85,13 @@
     },
     {
       "method": "GET",
+      "path": "/go/api/v1/empregabilidade/idiomas",
+      "action": "public",
+      "description": "Lista o catálogo idiomas da Empregabilidade (leitura pública)",
+      "source": "DEV-748"
+    },
+    {
+      "method": "GET",
       "path": "/go/api/v1/empregabilidade/idiomas/{id}",
       "action": "public",
       "description": "Busca um item do catálogo idiomas da Empregabilidade (leitura pública)",
@@ -96,6 +103,16 @@
       "action": "public",
       "description": "Busca um item do catálogo situacoes-atual da Empregabilidade (leitura pública)",
       "source": "DEV-659"
+    },
+    {
+      "method": "PUT",
+      "path": "/go/api/v1/empregabilidade/vagas/{id}/idiomas-requisito",
+      "same_as": {
+        "method": "PUT",
+        "path": "/go/api/v1/empregabilidade/vagas/{id}"
+      },
+      "description": "Grava os idiomas exigidos de uma vaga (mesma ação da edição da vaga; a propriedade da vaga é conferida no go-api)",
+      "source": "DEV-748"
     },
     {
       "method": "GET",

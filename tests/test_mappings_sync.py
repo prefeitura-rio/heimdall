@@ -35,6 +35,7 @@ REPO_FILE = Path(__file__).resolve().parent.parent / "mappings" / "go-api.json"
 WRITE_ACTION = "synthetic:catalog:write"
 CITIZEN_ACTION = "authenticated"
 OTHER_ACTION = "synthetic:other"
+VAGA_ACTION = "synthetic:vaga:edit"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -109,7 +110,7 @@ def _actions_by_key(db):
 @pytest.fixture
 def staging_like(db):
     """The state the issue describes: siblings mapped, the four cases not."""
-    for name in ("public", WRITE_ACTION, CITIZEN_ACTION, OTHER_ACTION):
+    for name in ("public", WRITE_ACTION, CITIZEN_ACTION, OTHER_ACTION, VAGA_ACTION):
         _action(db, name)
     go = "/go/api/v1"
     _mapping(db, "GET", f"{go}/empregabilidade/zonas$", "public")
@@ -130,16 +131,21 @@ def staging_like(db):
     ):
         _mapping(db, "GET", f"{go}/empregabilidade/{catalog}$", CITIZEN_ACTION)
         _mapping(db, "GET", f"{go}/empregabilidade/{catalog}/([^/]+)$", CITIZEN_ACTION)
-    # DEV-659: idiomas and situacoes-atual are listed publicly, but their GET by
-    # id is unmapped (idiomas) or mapped to an authenticated action
-    # (situacoes-atual); their writes stay with the admin action.
+    # DEV-659: the GET by id of idiomas and situacoes-atual is unmapped
+    # (idiomas) or mapped to an authenticated action (situacoes-atual); their
+    # writes stay with the admin action. DEV-748: situacoes-atual is listed
+    # publicly, but the listing of idiomas is mapped to an authenticated action.
     for catalog in ("idiomas", "situacoes-atual"):
-        _mapping(db, "GET", f"{go}/empregabilidade/{catalog}$", "public")
+        listing = CITIZEN_ACTION if catalog == "idiomas" else "public"
+        _mapping(db, "GET", f"{go}/empregabilidade/{catalog}$", listing)
         _mapping(db, "POST", f"{go}/empregabilidade/{catalog}$", WRITE_ACTION)
         _mapping(db, "PUT", f"{go}/empregabilidade/{catalog}/([^/]+)$", WRITE_ACTION)
+        _mapping(db, "DELETE", f"{go}/empregabilidade/{catalog}/([^/]+)$", WRITE_ACTION)
     _mapping(
         db, "GET", f"{go}/empregabilidade/situacoes-atual/([^/]+)$", CITIZEN_ACTION
     )
+    # DEV-748: the edition of a vacancy is mapped, its idiomas-requisito is not.
+    _mapping(db, "PUT", f"{go}/empregabilidade/vagas/([^/]+)$", VAGA_ACTION)
     # Same route without "/go", as the OpenAPI tool also generates it.
     _mapping(db, "GET", "/api/v1/empregabilidade/tipos-pcd$", CITIZEN_ACTION)
     # A mapping of another application, never to be touched.
@@ -218,7 +224,7 @@ def test_versioned_file_covers_the_four_cases_of_the_issue():
             entries[("POST", f"/go/api/v1/typesense/{kind}/search")].action == "public"
         )
 
-    assert len(spec.mappings) == 29
+    assert len(spec.mappings) == 31
     assert spec.remove == []
 
 
@@ -253,7 +259,7 @@ def test_plan_on_staging_like_db_shows_what_enters_and_changes(staging_like):
     assert creates[("DELETE", "/go/api/v1/instituicoes/([^/]+)$")] == WRITE_ACTION
     assert creates[("GET", "/go/api/v1/instituicoes$")] == "public"
     assert creates[("POST", "/go/api/v1/typesense/cursos/search$")] == "public"
-    assert len(creates) == 18
+    assert len(creates) == 19
     assert updates[("GET", "/go/api/v1/empregabilidade/tipos-pcd/([^/]+)$")] == (
         CITIZEN_ACTION,
         "public",
@@ -263,7 +269,7 @@ def test_plan_on_staging_like_db_shows_what_enters_and_changes(staging_like):
         CITIZEN_ACTION,
         "public",
     )
-    assert len(updates) == 12
+    assert len(updates) == 13
     assert not any(c.kind == ChangeKind.DELETE for c in plan.changes)
 
 
@@ -274,14 +280,21 @@ def test_versioned_file_makes_idiomas_and_situacoes_atual_by_id_public():
         entry = entries[("GET", f"/go/api/v1/empregabilidade/{catalog}/{{id}}")]
         assert entry.action == "public"
         assert entry.source == "DEV-659"
-    # Only the GET by id is declared: no write route of these catalogs is in
-    # the file, so the sync never touches their admin action.
+    # Only reads are declared (the GET by id, and since DEV-748 the listing of
+    # idiomas): no write route of these catalogs is in the file, so the sync
+    # never touches their admin action.
     declared = {
         (e.method, e.path)
         for e in spec.mappings
-        if "/idiomas" in e.path or "/situacoes-atual" in e.path
+        if e.path.startswith(
+            (
+                "/go/api/v1/empregabilidade/idiomas",
+                "/go/api/v1/empregabilidade/situacoes-atual",
+            )
+        )
     }
     assert declared == {
+        ("GET", "/go/api/v1/empregabilidade/idiomas"),
         ("GET", "/go/api/v1/empregabilidade/idiomas/{id}"),
         ("GET", "/go/api/v1/empregabilidade/situacoes-atual/{id}"),
     }
@@ -316,6 +329,105 @@ def test_apply_makes_idiomas_and_situacoes_atual_by_id_public_keeping_writes(
         assert after[("GET", f"{go}/{catalog}$")] == "public"
         assert after[("POST", f"{go}/{catalog}$")] == WRITE_ACTION
         assert after[("PUT", f"{go}/{catalog}/([^/]+)$")] == WRITE_ACTION
+
+
+def test_versioned_file_maps_idiomas_listing_and_vaga_idiomas_requisito():
+    spec = load_mapping_file(REPO_FILE)
+    entries = {(e.method, e.path): e for e in spec.mappings}
+    listing = entries[("GET", "/go/api/v1/empregabilidade/idiomas")]
+    assert listing.action == "public"
+    assert listing.same_as is None
+    assert listing.source == "DEV-748"
+    requisito = entries[
+        ("PUT", "/go/api/v1/empregabilidade/vagas/{id}/idiomas-requisito")
+    ]
+    assert requisito.action is None
+    assert requisito.same_as is not None
+    assert (requisito.same_as.method, requisito.same_as.path) == (
+        "PUT",
+        "/go/api/v1/empregabilidade/vagas/{id}",
+    )
+    assert requisito.source == "DEV-748"
+    # The only vacancy route in the file: the edition of the vacancy itself and
+    # the ownership check (vagaAuth, vagaOwnership) stay with the go-api.
+    assert {(e.method, e.path) for e in spec.mappings if "/vagas" in e.path} == {
+        ("PUT", "/go/api/v1/empregabilidade/vagas/{id}/idiomas-requisito")
+    }
+
+
+def test_apply_makes_idiomas_listing_public_and_maps_vaga_idiomas_requisito(
+    staging_like, engine, service
+):
+    db = staging_like
+    go = "/go/api/v1/empregabilidade"
+    requisito = f"{go}/vagas/([^/]+)/idiomas-requisito$"
+    _mapping(db, "GET", "/api/v1/empregabilidade/idiomas$", CITIZEN_ACTION)
+    plan = build_plan(db, load_mapping_file(REPO_FILE))
+    assert plan.errors == []
+    changes = {
+        (c.method, c.path_pattern): (c.kind, c.old_action_name, c.action_name)
+        for c in plan.changes
+    }
+    assert changes[("GET", f"{go}/idiomas$")] == (
+        ChangeKind.UPDATE,
+        CITIZEN_ACTION,
+        "public",
+    )
+    # The alias without "/go" is aligned too, so it cannot win at the edge.
+    assert changes[("GET", "/api/v1/empregabilidade/idiomas$")] == (
+        ChangeKind.UPDATE,
+        CITIZEN_ACTION,
+        "public",
+    )
+    assert changes[("PUT", requisito)] == (ChangeKind.CREATE, None, VAGA_ACTION)
+
+    assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_OK
+    after = _actions_by_key(db)
+    assert after[("GET", f"{go}/idiomas$")] == "public"
+    assert after[("GET", "/api/v1/empregabilidade/idiomas$")] == "public"
+    assert after[("PUT", requisito)] == VAGA_ACTION
+    # The edition of the vacancy and the writes of idiomas keep their actions.
+    assert after[("PUT", f"{go}/vagas/([^/]+)$")] == VAGA_ACTION
+    assert after[("POST", f"{go}/idiomas$")] == WRITE_ACTION
+    assert after[("PUT", f"{go}/idiomas/([^/]+)$")] == WRITE_ACTION
+    assert after[("DELETE", f"{go}/idiomas/([^/]+)$")] == WRITE_ACTION
+
+    # At the edge (anchored regex) the PUT now resolves to the vacancy action
+    # and the edition of the vacancy still resolves to its own mapping only.
+    def edge(method, path):
+        return {
+            e.action.name
+            for e in db.query(Endpoint).filter(Endpoint.method == method).all()
+            if re.search(convert_pattern_to_regex(e.path_pattern), path)
+        }
+
+    vaga = f"{go}/vagas/00000000-0000-0000-0000-000000000000"
+    assert edge("PUT", f"{vaga}/idiomas-requisito") == {VAGA_ACTION}
+    assert edge("PUT", vaga) == {VAGA_ACTION}
+    assert edge("GET", f"{go}/idiomas") == {"public"}
+    assert edge("POST", f"{go}/idiomas") == {WRITE_ACTION}
+    assert edge("DELETE", f"{go}/idiomas/1") == {WRITE_ACTION}
+
+
+def test_vaga_idiomas_requisito_without_the_vaga_mapping_aborts_before_any_write(
+    staging_like, engine, service
+):
+    # The PUT takes the action of the edition of the vacancy: if that route has
+    # no mapping, the sync must not guess one, and nothing is written.
+    db = staging_like
+    db.query(Endpoint).filter(
+        Endpoint.method == "PUT",
+        Endpoint.path_pattern == "/go/api/v1/empregabilidade/vagas/([^/]+)$",
+    ).delete()
+    db.commit()
+    plan = build_plan(db, load_mapping_file(REPO_FILE))
+    assert any(
+        "/vagas/{id}/idiomas-requisito" in e and "no mapping for that route" in e
+        for e in plan.errors
+    )
+    before = _actions_by_key(db)
+    assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_PLAN_ERRORS
+    assert _actions_by_key(db) == before
 
 
 def test_versioned_file_makes_the_public_course_catalog_public():
@@ -489,7 +601,7 @@ def test_apply_is_idempotent_and_leaves_other_mappings_alone(
     capsys.readouterr()
     assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_OK
     out = capsys.readouterr().out
-    assert "0 to create, 0 to update, 0 to delete, 29 unchanged" in out
+    assert "0 to create, 0 to update, 0 to delete, 31 unchanged" in out
     assert "No changes to apply." in out
     assert db.query(Endpoint).count() == count
 
@@ -500,7 +612,7 @@ def test_plan_command_never_writes(staging_like, engine, service, capsys):
     assert run("plan", str(REPO_FILE), db, engine, service) == EXIT_OK
     assert _actions_by_key(db) == before
     out = capsys.readouterr().out
-    assert "18 to create, 12 to update, 0 to delete" in out
+    assert "19 to create, 13 to update, 0 to delete" in out
     assert "Dry run (plan): nothing was written." in out
     service.redis_mapping_service.store_mapping.assert_not_called()
 
