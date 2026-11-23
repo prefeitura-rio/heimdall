@@ -119,6 +119,36 @@
       "source": "DEV-749"
     },
     {
+      "method": "POST",
+      "path": "/go/api/v1/empregabilidade/zonas",
+      "same_as": {
+        "method": "POST",
+        "path": "/go/api/v1/empregabilidade/idiomas"
+      },
+      "description": "Cria um item do catálogo zonas da Empregabilidade (mesma ação de administração do catálogo idiomas)",
+      "source": "DEV-750"
+    },
+    {
+      "method": "PUT",
+      "path": "/go/api/v1/empregabilidade/zonas/{id}",
+      "same_as": {
+        "method": "PUT",
+        "path": "/go/api/v1/empregabilidade/idiomas/{id}"
+      },
+      "description": "Atualiza um item do catálogo zonas da Empregabilidade (mesma ação de administração do catálogo idiomas)",
+      "source": "DEV-750"
+    },
+    {
+      "method": "DELETE",
+      "path": "/go/api/v1/empregabilidade/zonas/{id}",
+      "same_as": {
+        "method": "DELETE",
+        "path": "/go/api/v1/empregabilidade/idiomas/{id}"
+      },
+      "description": "Remove um item do catálogo zonas da Empregabilidade (mesma ação de administração do catálogo idiomas)",
+      "source": "DEV-750"
+    },
+    {
       "method": "PUT",
       "path": "/go/api/v1/empregabilidade/vagas/{id}/idiomas-requisito",
       "same_as": {
