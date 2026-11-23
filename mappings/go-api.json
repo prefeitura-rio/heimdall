@@ -105,6 +105,20 @@
       "source": "DEV-659"
     },
     {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/zonas",
+      "action": "public",
+      "description": "Lista o catálogo zonas da Empregabilidade (leitura pública)",
+      "source": "DEV-749"
+    },
+    {
+      "method": "GET",
+      "path": "/go/api/v1/empregabilidade/zonas/{id}",
+      "action": "public",
+      "description": "Busca um item do catálogo zonas da Empregabilidade (leitura pública)",
+      "source": "DEV-749"
+    },
+    {
       "method": "PUT",
       "path": "/go/api/v1/empregabilidade/vagas/{id}/idiomas-requisito",
       "same_as": {
