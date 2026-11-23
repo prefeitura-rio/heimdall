@@ -113,7 +113,7 @@ def staging_like(db):
     for name in ("public", WRITE_ACTION, CITIZEN_ACTION, OTHER_ACTION, VAGA_ACTION):
         _action(db, name)
     go = "/go/api/v1"
-    _mapping(db, "GET", f"{go}/empregabilidade/zonas$", "public")
+    # DEV-749: the zonas catalog has no mapping at all (no action mapping).
     _mapping(db, "GET", f"{go}/categorias$", "public")
     _mapping(db, "POST", f"{go}/categorias$", WRITE_ACTION)
     _mapping(db, "PUT", f"{go}/categorias/([^/]+)$", WRITE_ACTION)
@@ -224,7 +224,7 @@ def test_versioned_file_covers_the_four_cases_of_the_issue():
             entries[("POST", f"/go/api/v1/typesense/{kind}/search")].action == "public"
         )
 
-    assert len(spec.mappings) == 31
+    assert len(spec.mappings) == 33
     assert spec.remove == []
 
 
@@ -259,7 +259,7 @@ def test_plan_on_staging_like_db_shows_what_enters_and_changes(staging_like):
     assert creates[("DELETE", "/go/api/v1/instituicoes/([^/]+)$")] == WRITE_ACTION
     assert creates[("GET", "/go/api/v1/instituicoes$")] == "public"
     assert creates[("POST", "/go/api/v1/typesense/cursos/search$")] == "public"
-    assert len(creates) == 19
+    assert len(creates) == 21
     assert updates[("GET", "/go/api/v1/empregabilidade/tipos-pcd/([^/]+)$")] == (
         CITIZEN_ACTION,
         "public",
@@ -428,6 +428,71 @@ def test_vaga_idiomas_requisito_without_the_vaga_mapping_aborts_before_any_write
     before = _actions_by_key(db)
     assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_PLAN_ERRORS
     assert _actions_by_key(db) == before
+
+
+def test_versioned_file_makes_the_zonas_catalog_public():
+    spec = load_mapping_file(REPO_FILE)
+    entries = {(e.method, e.path): e for e in spec.mappings}
+    for path in (
+        "/go/api/v1/empregabilidade/zonas",
+        "/go/api/v1/empregabilidade/zonas/{id}",
+    ):
+        entry = entries[("GET", path)]
+        assert entry.action == "public"
+        assert entry.same_as is None
+        assert entry.source == "DEV-749"
+    # Only the two reads of the lookup table are declared: its writes (POST,
+    # PUT, DELETE) are not in the file, so they keep having no public action.
+    declared = {
+        (e.method, e.path)
+        for e in spec.mappings
+        if e.path.startswith("/go/api/v1/empregabilidade/zonas")
+    }
+    assert declared == {
+        ("GET", "/go/api/v1/empregabilidade/zonas"),
+        ("GET", "/go/api/v1/empregabilidade/zonas/{id}"),
+    }
+
+
+def test_apply_makes_the_zonas_catalog_public_without_opening_its_writes(
+    staging_like, engine, service
+):
+    db = staging_like
+    go = "/go/api/v1/empregabilidade"
+    plan = build_plan(db, load_mapping_file(REPO_FILE))
+    assert plan.errors == []
+    changes = {
+        (c.method, c.path_pattern): (c.kind, c.old_action_name, c.action_name)
+        for c in plan.changes
+        if "/zonas" in c.path_pattern
+    }
+    assert changes == {
+        ("GET", f"{go}/zonas$"): (ChangeKind.CREATE, None, "public"),
+        ("GET", f"{go}/zonas/([^/]+)$"): (ChangeKind.CREATE, None, "public"),
+    }
+
+    assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_OK
+    after = _actions_by_key(db)
+    assert after[("GET", f"{go}/zonas$")] == "public"
+    assert after[("GET", f"{go}/zonas/([^/]+)$")] == "public"
+
+    # At the edge (anchored regex) the reads resolve to the public action and
+    # the writes of the lookup table still resolve to no mapping at all.
+    def edge(method, path):
+        return {
+            e.action.name
+            for e in db.query(Endpoint).filter(Endpoint.method == method).all()
+            if re.search(convert_pattern_to_regex(e.path_pattern), path)
+        }
+
+    zona = f"{go}/zonas/00000000-0000-0000-0000-000000000000"
+    assert edge("GET", f"{go}/zonas") == {"public"}
+    assert edge("GET", zona) == {"public"}
+    assert edge("POST", f"{go}/zonas") == set()
+    assert edge("PUT", zona) == set()
+    assert edge("DELETE", zona) == set()
+    # A deeper path is not caught by the by-id pattern.
+    assert edge("GET", f"{zona}/extra") == set()
 
 
 def test_versioned_file_makes_the_public_course_catalog_public():
@@ -601,7 +666,7 @@ def test_apply_is_idempotent_and_leaves_other_mappings_alone(
     capsys.readouterr()
     assert run("apply", str(REPO_FILE), db, engine, service) == EXIT_OK
     out = capsys.readouterr().out
-    assert "0 to create, 0 to update, 0 to delete, 31 unchanged" in out
+    assert "0 to create, 0 to update, 0 to delete, 33 unchanged" in out
     assert "No changes to apply." in out
     assert db.query(Endpoint).count() == count
 
@@ -612,7 +677,7 @@ def test_plan_command_never_writes(staging_like, engine, service, capsys):
     assert run("plan", str(REPO_FILE), db, engine, service) == EXIT_OK
     assert _actions_by_key(db) == before
     out = capsys.readouterr().out
-    assert "19 to create, 13 to update, 0 to delete" in out
+    assert "21 to create, 13 to update, 0 to delete" in out
     assert "Dry run (plan): nothing was written." in out
     service.redis_mapping_service.store_mapping.assert_not_called()
 
