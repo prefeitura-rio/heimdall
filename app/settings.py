@@ -79,7 +79,6 @@ class Settings:
 
         # Background Task Configuration
         self.RECONCILE_INTERVAL_SECONDS: int = int(os.getenv("RECONCILE_INTERVAL_SECONDS", "300"))
-        self.SYNC_RETRY_INTERVAL_SECONDS: int = int(os.getenv("SYNC_RETRY_INTERVAL_SECONDS", "60"))
 
         # Server Configuration
         self.HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -155,10 +154,6 @@ class Settings:
     def get_reconcile_interval(self) -> int:
         """Get the reconciliation interval in seconds."""
         return self.RECONCILE_INTERVAL_SECONDS
-
-    def get_sync_retry_interval(self) -> int:
-        """Get the sync retry interval in seconds."""
-        return self.SYNC_RETRY_INTERVAL_SECONDS
 
     def validate(self) -> None:
         """
@@ -236,7 +231,6 @@ class Settings:
             ),
             ("OTEL_RESOURCE_ATTRIBUTES", "OpenTelemetry resource attributes", ""),
             ("RECONCILE_INTERVAL_SECONDS", "Background reconciliation interval (with UUID change detection)", "2"),
-            ("SYNC_RETRY_INTERVAL_SECONDS", "Sync retry interval", "60"),
             ("HOST", "Server host address", "0.0.0.0"),
             ("PORT", "Server port", "8080"),
             (
@@ -456,7 +450,6 @@ class Settings:
             ("REDIS_USER_ROLES_TTL", self.REDIS_USER_ROLES_TTL, 1, 3600),  # 1 second to 1 hour
             ("REDIS_JWKS_TTL", self.REDIS_JWKS_TTL, 60, 86400),  # 1 minute to 1 day
             ("RECONCILE_INTERVAL_SECONDS", self.RECONCILE_INTERVAL_SECONDS, 1, 86400),  # 1 second to 1 day (UUID change detection allows very frequent checks)
-            ("SYNC_RETRY_INTERVAL_SECONDS", self.SYNC_RETRY_INTERVAL_SECONDS, 10, 3600),  # 10 seconds to 1 hour
             ("PORT", self.PORT, 1, 65535),  # Valid port range
         ]
 
@@ -571,7 +564,6 @@ class Settings:
             "OTEL_SERVICE_NAME": self.OTEL_SERVICE_NAME,
             "OTEL_RESOURCE_ATTRIBUTES": self.OTEL_RESOURCE_ATTRIBUTES,
             "RECONCILE_INTERVAL_SECONDS": self.RECONCILE_INTERVAL_SECONDS,
-            "SYNC_RETRY_INTERVAL_SECONDS": self.SYNC_RETRY_INTERVAL_SECONDS,
             "HOST": self.HOST,
             "PORT": self.PORT,
             "CORS_ALLOWED_ORIGINS": ",".join(self.CORS_ALLOWED_ORIGINS),

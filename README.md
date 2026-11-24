@@ -60,7 +60,7 @@ A comprehensive admin service for group and role management with Cerbos authoriz
 - **Redis Caching**: High-performance caching for mappings, roles, and JWKS
 - **Database Monitoring**: Real-time query performance monitoring and optimization
 - **Health Monitoring**: Comprehensive health checks for all dependencies
-- **Background Tasks**: Automated reconciliation and retry mechanisms
+- **Background Tasks**: Automated reconciliation of Cerbos policies
 - **Security**: JWT verification, static API tokens, input validation
 
 ## 🏗️ Architecture
@@ -116,7 +116,6 @@ All configuration is done via environment variables. Copy [`.env.example`](.env.
 | `REDIS_JWKS_TTL` | ❌ | `300` | JWKS cache TTL in seconds |
 | **Background Tasks** |
 | `RECONCILE_INTERVAL_SECONDS` | ❌ | `300` | Cerbos policy reconciliation interval |
-| `SYNC_RETRY_INTERVAL_SECONDS` | ❌ | `60` | Failed sync retry interval |
 | **Server** |
 | `HOST` | ❌ | `0.0.0.0` | Server bind address |
 | `PORT` | ❌ | `8080` | Server port |
@@ -271,10 +270,10 @@ The background service runs automated maintenance tasks:
 - **Configurable Interval**: Default every 5 minutes, configurable via environment
 - **Error Handling**: Comprehensive error tracking and retry logic
 
-### Retry Mechanisms
-- **Failed Operations**: Automatic retry of failed Cerbos operations
-- **Exponential Backoff**: Smart retry timing to avoid overwhelming services
-- **Alert Generation**: Logging for permanently failed operations
+### Retry of failed Cerbos pushes
+- **No separate retry job**: a run with any failed user does not mark the policy
+  version as synced, so the next reconciliation run walks the users again and
+  re-pushes every user whose last push did not succeed
 
 ## 🗺️ Versioned Endpoint Mappings
 
