@@ -374,7 +374,7 @@ This document contains a comprehensive list of tasks to implement the Heimdall A
   - Progress tracking and logging
   - Audit trail for reconciliation operations
 
-### Task 14.3: Implement Sync Retry Logic ✅
+### Task 14.3: Implement Sync Retry Logic ✅ (removed in DEV-777: nothing wrote `failed_operations`; the reconciliation re-pushes failed users)
 - [x] Create sync retry functions:
   - `retry_failed_syncs()` - retry failed Cerbos operations
   - Framework ready for exponential backoff

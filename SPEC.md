@@ -305,8 +305,8 @@ Delete mapping (check permissions)
 Reconciliation and sync operations run as background tasks:
 
 - **Reconciliation task**: Periodically walks memberships, retrieves group→role mapping, and ensures Cerbos principal policies reflect DB state
-- **Sync task**: Handles any failed Cerbos Admin API calls with retry logic
-- Both tasks run automatically in the background (no manual endpoints)
+- **Retry of failed Cerbos Admin API calls**: there is no separate retry task. A reconciliation run with any failed user does not mark the policy version as synced, so the next run walks the users again and re-pushes each user whose last push did not succeed (per-user hash in Redis)
+- The task runs automatically in the background (no manual endpoints)
 
 ### 3.7 Health and meta endpoints
 
@@ -373,7 +373,7 @@ The service automatically pushes principal policies to Cerbos Admin API. This is
 1. Insert membership row into DB (within DB transaction)
 2. Automatically build and push principal policy for the user that aggregates all roles
 3. On success: commit DB transaction and return success to caller
-4. On failure: use background retry job to ensure eventual consistency
+4. On failure: the next background reconciliation run re-pushes the policy (eventual consistency)
 
 **Policy management is completely transparent** - users never see or manipulate Cerbos policy formats.
 
@@ -496,7 +496,6 @@ OTEL_RESOURCE_ATTRIBUTES=service.name=heimdall-admin-service,service.version=1.0
 
 # Background Tasks (for background container only)
 RECONCILE_INTERVAL_SECONDS=300  # 5 minutes
-SYNC_RETRY_INTERVAL_SECONDS=60  # 1 minute
 
 # Server (for API container only)
 HOST=0.0.0.0
