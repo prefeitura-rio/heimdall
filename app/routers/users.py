@@ -5,7 +5,7 @@ Implements user endpoints as specified in SPEC.md Section 3.1.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import exists
 from sqlalchemy.orm import Session
@@ -27,6 +27,9 @@ logger = get_structured_logger(__name__)
 # the masked log only, never to the response (DEV-560).
 LIST_USERS_FAILED_DETAIL = "Failed to list users"
 USER_INFO_FAILED_DETAIL = "Failed to retrieve user information"
+
+# A CPF is 11 ASCII digits, no punctuation (DEV-793).
+CPF_PATTERN = "^[0-9]{11}$"
 
 
 # Pydantic models for request/response
@@ -400,12 +403,14 @@ roles inherited through group memberships.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Validation error",
-                        "errors": [
+                        "error": "Validation error",
+                        "details": [
                             {
+                                "type": "string_pattern_mismatch",
                                 "loc": ["path", "cpf"],
-                                "msg": "string does not match regex",
-                                "type": "value_error.regex"
+                                "msg": "String should match pattern '^[0-9]{11}$'",
+                                "input": "123.456.789-01",
+                                "ctx": {"pattern": "^[0-9]{11}$"}
                             }
                         ]
                     }
@@ -425,7 +430,15 @@ roles inherited through group memberships.
     }
 )
 async def get_user_by_cpf(
-    cpf: str,
+    # Validated here so the documented 422 happens: a malformed CPF is refused
+    # before Cerbos and the lookup, the same for every caller (DEV-793).
+    cpf: Annotated[
+        str,
+        Path(
+            description="User's CPF: 11 digits, no punctuation",
+            pattern=CPF_PATTERN,
+        ),
+    ],
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     user_service: Annotated[UserService, Depends(lambda: UserService())],
