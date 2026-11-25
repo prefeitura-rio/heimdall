@@ -964,12 +964,44 @@ RMI_ADMIN_ROUTES = {
 }
 
 
+# DEV-796: the Salesforce/LGPD, auth/validate and cpf-secretaria routes.
+# CPF in the path (RequireOwnCPF in the RMI) -> the citizen action of the pets.
+RMI_OWN_CPF_ROUTES = {
+    ("PATCH", f"{RMI}/salesforce/cidadao/{{cpf}}/consentimento"),
+    ("GET", f"{RMI}/salesforce/cidadao/{{cpf}}/exportar"),
+    ("POST", f"{RMI}/salesforce/cidadao/{{cpf}}/anonimizar"),
+    ("GET", f"{RMI}/cpf-secretaria/{{cpf}}"),
+}
+# Authenticated, no CPF in the path -> "authenticated".
+RMI_AUTHENTICATED_ROUTES = {
+    ("GET", f"{RMI}/salesforce/chamados"),
+    ("GET", f"{RMI}/salesforce/chamados/{{protocolo}}"),
+    ("GET", f"{RMI}/salesforce/anonimizacao/{{numeroSolicitacao}}"),
+    ("GET", f"{RMI}/auth/validate"),
+}
+# Admin route -> the /admin/beta/groups route of the same verb it follows.
+RMI_CPF_SECRETARIA_ADMIN_ROUTES = {
+    ("GET", f"{RMI}/admin/cpf-secretaria/{{cpf}}"): ("GET", "/admin/beta/groups"),
+    ("POST", f"{RMI}/admin/cpf-secretaria/{{cpf}}"): ("POST", "/admin/beta/groups"),
+    ("DELETE", f"{RMI}/admin/cpf-secretaria/{{cpf}}/{{cd_ua}}"): (
+        "DELETE",
+        "/admin/beta/groups/{group_id}",
+    ),
+}
+RMI_DEV_796_ROUTES = (
+    RMI_OWN_CPF_ROUTES | RMI_AUTHENTICATED_ROUTES | set(RMI_CPF_SECRETARIA_ADMIN_ROUTES)
+)
+RMI_MOBILITY_ROUTES = RMI_CITIZEN_ROUTES | RMI_CATALOG_ROUTES | set(RMI_ADMIN_ROUTES)
+RMI_ALL_ADMIN_ROUTES = {**RMI_ADMIN_ROUTES, **RMI_CPF_SECRETARIA_ADMIN_ROUTES}
+RMI_FILE_ENTRIES = len(RMI_MOBILITY_ROUTES) + len(RMI_DEV_796_ROUTES)
+
+
 def _expected_rmi_action(method, path):
-    if (method, path) in RMI_CITIZEN_ROUTES:
+    if (method, path) in RMI_CITIZEN_ROUTES | RMI_OWN_CPF_ROUTES:
         return RMI_CITIZEN_ACTION
-    if (method, path) in RMI_CATALOG_ROUTES:
+    if (method, path) in RMI_CATALOG_ROUTES | RMI_AUTHENTICATED_ROUTES:
         return "authenticated"
-    return RMI_ADMIN_ACTIONS[RMI_ADMIN_ROUTES[(method, path)][0]]
+    return RMI_ADMIN_ACTIONS[RMI_ALL_ADMIN_ROUTES[(method, path)][0]]
 
 
 def _resolves_at_edge(db, method, path):
@@ -1023,10 +1055,8 @@ def test_app_rmi_file_maps_the_mobility_routes_of_the_issue():
     assert spec.path_prefix == "/rmi/v1/"
     assert spec.remove == []
     entries = {(e.method, e.path): e for e in spec.mappings}
-    assert set(entries) == (
-        RMI_CITIZEN_ROUTES | RMI_CATALOG_ROUTES | set(RMI_ADMIN_ROUTES)
-    )
-    assert len(spec.mappings) == 21
+    assert set(entries) == RMI_MOBILITY_ROUTES | RMI_DEV_796_ROUTES
+    assert len(spec.mappings) == RMI_FILE_ENTRIES == 32
 
     for key in RMI_CITIZEN_ROUTES:
         ref = entries[key].same_as
@@ -1040,7 +1070,7 @@ def test_app_rmi_file_maps_the_mobility_routes_of_the_issue():
         assert (ref.method, ref.path) == (verb, f"{RMI}{path}")
     # Nothing public: every mobility route needs at least a valid JWT.
     assert all(e.action != "public" for e in spec.mappings)
-    assert {e.source for e in spec.mappings} == {"DEV-734"}
+    assert {entries[key].source for key in RMI_MOBILITY_ROUTES} == {"DEV-734"}
 
 
 def test_plan_on_rmi_staging_like_db_creates_the_mobility_mappings(
@@ -1092,13 +1122,78 @@ def test_apply_makes_the_mobility_routes_resolve_at_the_edge(
 
     after = _actions_by_key(db)
     assert {k: v for k, v in after.items() if k in before} == before  # untouched
-    assert len(after) == len(before) + 21
+    assert len(after) == len(before) + RMI_FILE_ENTRIES
 
     capsys.readouterr()
     assert run("apply", str(RMI_FILE), db, engine, service) == EXIT_OK
     out = capsys.readouterr().out
-    assert "0 to create, 0 to update, 0 to delete, 21 unchanged" in out
+    assert f"0 to create, 0 to update, 0 to delete, {RMI_FILE_ENTRIES} unchanged" in out
     assert "No changes to apply." in out
+
+
+def test_app_rmi_file_maps_the_salesforce_lgpd_and_cpf_secretaria_routes():
+    spec = load_mapping_file(RMI_FILE)
+    entries = {(e.method, e.path): e for e in spec.mappings}
+    assert set(entries) >= RMI_DEV_796_ROUTES
+    assert len(RMI_DEV_796_ROUTES) == 11
+
+    for key in RMI_OWN_CPF_ROUTES:
+        ref = entries[key].same_as
+        assert ref is not None, key
+        assert entries[key].action is None, key
+        assert (ref.method, ref.path) == ("GET", f"{RMI}/citizen/{{cpf}}/pets")
+    for key in RMI_AUTHENTICATED_ROUTES:
+        assert entries[key].action == "authenticated", key
+        assert entries[key].same_as is None, key
+    for key, (verb, path) in RMI_CPF_SECRETARIA_ADMIN_ROUTES.items():
+        ref = entries[key].same_as
+        assert ref is not None, key
+        assert (ref.method, ref.path) == (verb, f"{RMI}{path}")
+    # Nothing public, and the Salesforce webhook is not this file's (OPS-265).
+    assert all(entries[key].action != "public" for key in RMI_DEV_796_ROUTES)
+    assert not any("/webhooks/" in path for _, path in entries)
+    assert {entries[key].source for key in RMI_DEV_796_ROUTES} == {"DEV-796"}
+
+
+def test_apply_makes_the_salesforce_and_cpf_secretaria_routes_resolve_at_the_edge(
+    rmi_staging_like, engine, service
+):
+    db = rmi_staging_like
+    cpf = "00000000000"
+    probes = {
+        ("PATCH", f"{RMI}/salesforce/cidadao/{cpf}/consentimento"): RMI_CITIZEN_ACTION,
+        ("GET", f"{RMI}/salesforce/cidadao/{cpf}/exportar"): RMI_CITIZEN_ACTION,
+        ("POST", f"{RMI}/salesforce/cidadao/{cpf}/anonimizar"): RMI_CITIZEN_ACTION,
+        ("GET", f"{RMI}/cpf-secretaria/{cpf}"): RMI_CITIZEN_ACTION,
+        ("GET", f"{RMI}/salesforce/chamados"): "authenticated",
+        ("GET", f"{RMI}/salesforce/chamados/2026-0001"): "authenticated",
+        ("GET", f"{RMI}/salesforce/anonimizacao/SOL-1"): "authenticated",
+        ("GET", f"{RMI}/auth/validate"): "authenticated",
+        ("GET", f"{RMI}/admin/cpf-secretaria/{cpf}"): RMI_ADMIN_ACTIONS["GET"],
+        ("POST", f"{RMI}/admin/cpf-secretaria/{cpf}"): RMI_ADMIN_ACTIONS["POST"],
+        ("DELETE", f"{RMI}/admin/cpf-secretaria/{cpf}/1234"): RMI_ADMIN_ACTIONS[
+            "DELETE"
+        ],
+    }
+    # The issue: no stored pattern resolves them (no action mapping).
+    for method, path in probes:
+        assert _resolves_at_edge(db, method, path) == set(), (method, path)
+
+    assert run("apply", str(RMI_FILE), db, engine, service) == EXIT_OK
+
+    # Each one resolves to exactly its action: the citizen cpf-secretaria route
+    # never matches the admin one (anchored regex) nor the other way round.
+    for (method, path), action in probes.items():
+        assert _resolves_at_edge(db, method, path) == {action}, (method, path)
+    # Only the declared verbs and shapes are mapped.
+    assert _resolves_at_edge(db, "DELETE", f"{RMI}/cpf-secretaria/{cpf}") == set()
+    assert _resolves_at_edge(db, "GET", f"{RMI}/cpf-secretaria/{cpf}/x") == set()
+    assert _resolves_at_edge(db, "POST", f"{RMI}/auth/validate") == set()
+    assert (
+        _resolves_at_edge(db, "PUT", f"{RMI}/salesforce/cidadao/{cpf}/consentimento")
+        == set()
+    )
+    assert _resolves_at_edge(db, "POST", f"{RMI}/webhooks/salesforce/cidadao") == set()
 
 
 def test_app_rmi_alias_without_prefix_follows_the_declared_action(rmi_staging_like):
