@@ -61,12 +61,11 @@ def _role_action_fingerprint(session) -> str:
     Cerbos rules by joining Role -> RoleAction -> Action fresh from the DB on
     every push, so a user's effective policy can change even when their own
     role list doesn't (e.g. an action gets revoked from a role they hold).
-    Note: sync_affected_users_policies()/sync_group_users_policies() in
-    CerbosService are dead code with no callers, so this reconciliation loop
-    is the ONLY path that propagates role/action mapping changes to Cerbos -
-    the per-user hash below MUST be sensitive to this table, not just to
-    each user's own role names, or privilege revocations would be silently
-    skipped forever.
+    Note: there is no immediate per-role or per-group policy sync, so this
+    reconciliation loop is the ONLY path that propagates role/action mapping
+    changes to Cerbos - the per-user hash below MUST be sensitive to this
+    table, not just to each user's own role names, or privilege revocations
+    would be silently skipped forever.
 
     Any role/action mapping change flips this fingerprint for every user in
     the current run, forcing a full re-push - identical to today's
