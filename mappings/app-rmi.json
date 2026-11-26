@@ -172,6 +172,13 @@
       "source": "DEV-796"
     },
     {
+      "method": "POST",
+      "path": "/rmi/v1/webhooks/salesforce/cidadao",
+      "action": "authenticated",
+      "description": "Webhook do Salesforce que atualiza os dados do cidadão (JWT do Keycloak; o RMI confere o cliente do Salesforce pelo azp)",
+      "source": "OPS-375"
+    },
+    {
       "method": "GET",
       "path": "/rmi/v1/salesforce/chamados",
       "action": "authenticated",
