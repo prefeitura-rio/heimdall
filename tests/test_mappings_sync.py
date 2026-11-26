@@ -991,15 +991,22 @@ RMI_CPF_SECRETARIA_ADMIN_ROUTES = {
 RMI_DEV_796_ROUTES = (
     RMI_OWN_CPF_ROUTES | RMI_AUTHENTICATED_ROUTES | set(RMI_CPF_SECRETARIA_ADMIN_ROUTES)
 )
+# OPS-375: the Salesforce webhook. The RMI checks the Keycloak JWT and the
+# Salesforce client (azp) itself; the edge only needs a valid JWT.
+RMI_WEBHOOK_ROUTES = {("POST", f"{RMI}/webhooks/salesforce/cidadao")}
 RMI_MOBILITY_ROUTES = RMI_CITIZEN_ROUTES | RMI_CATALOG_ROUTES | set(RMI_ADMIN_ROUTES)
 RMI_ALL_ADMIN_ROUTES = {**RMI_ADMIN_ROUTES, **RMI_CPF_SECRETARIA_ADMIN_ROUTES}
-RMI_FILE_ENTRIES = len(RMI_MOBILITY_ROUTES) + len(RMI_DEV_796_ROUTES)
+RMI_FILE_ENTRIES = (
+    len(RMI_MOBILITY_ROUTES) + len(RMI_DEV_796_ROUTES) + len(RMI_WEBHOOK_ROUTES)
+)
 
 
 def _expected_rmi_action(method, path):
     if (method, path) in RMI_CITIZEN_ROUTES | RMI_OWN_CPF_ROUTES:
         return RMI_CITIZEN_ACTION
-    if (method, path) in RMI_CATALOG_ROUTES | RMI_AUTHENTICATED_ROUTES:
+    if (method, path) in (
+        RMI_CATALOG_ROUTES | RMI_AUTHENTICATED_ROUTES | RMI_WEBHOOK_ROUTES
+    ):
         return "authenticated"
     return RMI_ADMIN_ACTIONS[RMI_ALL_ADMIN_ROUTES[(method, path)][0]]
 
@@ -1055,8 +1062,8 @@ def test_app_rmi_file_maps_the_mobility_routes_of_the_issue():
     assert spec.path_prefix == "/rmi/v1/"
     assert spec.remove == []
     entries = {(e.method, e.path): e for e in spec.mappings}
-    assert set(entries) == RMI_MOBILITY_ROUTES | RMI_DEV_796_ROUTES
-    assert len(spec.mappings) == RMI_FILE_ENTRIES == 32
+    assert set(entries) == RMI_MOBILITY_ROUTES | RMI_DEV_796_ROUTES | RMI_WEBHOOK_ROUTES
+    assert len(spec.mappings) == RMI_FILE_ENTRIES == 33
 
     for key in RMI_CITIZEN_ROUTES:
         ref = entries[key].same_as
@@ -1149,9 +1156,8 @@ def test_app_rmi_file_maps_the_salesforce_lgpd_and_cpf_secretaria_routes():
         ref = entries[key].same_as
         assert ref is not None, key
         assert (ref.method, ref.path) == (verb, f"{RMI}{path}")
-    # Nothing public, and the Salesforce webhook is not this file's (OPS-265).
+    # Nothing public.
     assert all(entries[key].action != "public" for key in RMI_DEV_796_ROUTES)
-    assert not any("/webhooks/" in path for _, path in entries)
     assert {entries[key].source for key in RMI_DEV_796_ROUTES} == {"DEV-796"}
 
 
@@ -1193,7 +1199,37 @@ def test_apply_makes_the_salesforce_and_cpf_secretaria_routes_resolve_at_the_edg
         _resolves_at_edge(db, "PUT", f"{RMI}/salesforce/cidadao/{cpf}/consentimento")
         == set()
     )
-    assert _resolves_at_edge(db, "POST", f"{RMI}/webhooks/salesforce/cidadao") == set()
+
+
+def test_app_rmi_file_maps_the_salesforce_webhook_as_authenticated():
+    spec = load_mapping_file(RMI_FILE)
+    entries = {(e.method, e.path): e for e in spec.mappings}
+    webhook = entries[("POST", f"{RMI}/webhooks/salesforce/cidadao")]
+    # A valid JWT at the edge, never public; the RMI checks the azp itself.
+    assert webhook.action == "authenticated"
+    assert webhook.same_as is None
+    assert webhook.source == "OPS-375"
+    # It is the only webhook of the file, and only with POST.
+    assert {key for key in entries if "/webhooks/" in key[1]} == RMI_WEBHOOK_ROUTES
+
+
+def test_apply_makes_the_salesforce_webhook_resolve_to_authenticated_at_the_edge(
+    rmi_staging_like, engine, service
+):
+    db = rmi_staging_like
+    webhook = f"{RMI}/webhooks/salesforce/cidadao"
+    # The issue: no stored pattern resolves it (no action mapping found).
+    assert _resolves_at_edge(db, "POST", webhook) == set()
+
+    assert run("apply", str(RMI_FILE), db, engine, service) == EXIT_OK
+
+    assert _resolves_at_edge(db, "POST", webhook) == {"authenticated"}
+    # Only the declared verb and the exact path are mapped.
+    for method in ("GET", "PUT", "PATCH", "DELETE"):
+        assert _resolves_at_edge(db, method, webhook) == set(), method
+    assert _resolves_at_edge(db, "POST", f"{webhook}/x") == set()
+    assert _resolves_at_edge(db, "POST", f"{RMI}/webhooks/salesforce") == set()
+    assert _resolves_at_edge(db, "POST", f"{RMI}/webhooks/salesforce/outro") == set()
 
 
 def test_app_rmi_alias_without_prefix_follows_the_declared_action(rmi_staging_like):
