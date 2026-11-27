@@ -10,12 +10,22 @@ from opentelemetry import trace
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.exceptions import ActionNotFoundError, MappingAlreadyExistsError
 from app.models import Action, Endpoint, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
+from app.services.path_pattern import convert_pattern_to_regex
 from app.services.redis_mapping import RedisMappingService
+from app.tracing import subject_kind
+
+# A path segment that starts with ":name" (optionally right after a leading "^").
+_NAMED_PARAM_SEGMENT = re.compile(r"(?:^\^?|/):[A-Za-z_]")
+_NAMED_PARAM_ERROR = (
+    "Invalid path pattern: ':name' path parameters are not supported; "
+    "use a regex group such as '([^/]+)' instead"
+)
 
 
 class MappingService(BaseService):
@@ -145,11 +155,16 @@ class MappingService(BaseService):
                 "mapping.path_pattern": path_pattern,
                 "mapping.method": method,
                 "mapping.action_id": action_id,
-                "mapping.created_by": created_by.subject,
+                "mapping.created_by": subject_kind(created_by.subject),
+                "mapping.created_by_user_id": created_by.id,
                 "mapping.operation": "create",
             },
         ) as span:
             try:
+                if self._has_named_param_segment(path_pattern):
+                    span.set_attribute("mapping.invalid_pattern", True)
+                    raise ValueError(_NAMED_PARAM_ERROR)
+
                 # Validate the regex pattern
                 try:
                     pattern = self._convert_pattern_to_regex(path_pattern)
@@ -162,7 +177,7 @@ class MappingService(BaseService):
                 action = db.query(Action).filter(Action.id == action_id).first()
                 if not action:
                     span.set_attribute("mapping.action_not_found", True)
-                    raise ValueError(f"Action with ID {action_id} not found")
+                    raise ActionNotFoundError(action_id)
 
                 span.set_attribute("mapping.action_name", action.name)
 
@@ -177,9 +192,7 @@ class MappingService(BaseService):
 
                 if existing:
                     span.set_attribute("mapping.already_exists", True)
-                    raise ValueError(
-                        f"Mapping for pattern '{path_pattern}' and method '{method}' already exists"
-                    )
+                    raise MappingAlreadyExistsError(path_pattern, method)
 
                 # Create the endpoint mapping
                 endpoint = Endpoint(
@@ -293,7 +306,8 @@ class MappingService(BaseService):
             "update_mapping",
             {
                 "mapping.id": mapping_id,
-                "mapping.updated_by": updated_by.subject,
+                "mapping.updated_by": subject_kind(updated_by.subject),
+                "mapping.updated_by_user_id": updated_by.id,
                 "mapping.operation": "update",
             },
         ) as span:
@@ -308,6 +322,10 @@ class MappingService(BaseService):
                 updated = False
 
                 if path_pattern is not None:
+                    if self._has_named_param_segment(path_pattern):
+                        span.set_attribute("mapping.invalid_pattern", True)
+                        raise ValueError(_NAMED_PARAM_ERROR)
+
                     # Validate the regex pattern
                     try:
                         pattern = self._convert_pattern_to_regex(path_pattern)
@@ -434,7 +452,8 @@ class MappingService(BaseService):
             "delete_mapping",
             {
                 "mapping.id": mapping_id,
-                "mapping.deleted_by": deleted_by.subject,
+                "mapping.deleted_by": subject_kind(deleted_by.subject),
+                "mapping.deleted_by_user_id": deleted_by.id,
                 "mapping.operation": "delete",
             },
         ) as span:
@@ -527,44 +546,26 @@ class MappingService(BaseService):
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 raise
 
+    def _has_named_param_segment(self, path_pattern: str) -> bool:
+        """
+        Whether the pattern has a ":name" segment (e.g. "/users/:id").
+
+        ":param" is not supported (DEV-186): neither the Redis fast path (raw
+        pattern) nor the database fallback turns it into a parameter, so such a
+        mapping would only match the literal text ":id". Creation and update
+        refuse it. A colon inside a segment ("/files/x:copy") is a literal
+        character and stays allowed.
+        """
+        return _NAMED_PARAM_SEGMENT.search(path_pattern) is not None
+
     def _convert_pattern_to_regex(self, path_pattern: str) -> str:
         """
-        Convert a simple path pattern to a full regex pattern.
-        Supports:
-        - * for any characters within a path segment
-        - ** for any path segments
-        - :param for named parameters
-        - Raw regex patterns with parentheses for capture groups
+        Convert a path pattern to the anchored regex it is matched with.
+
+        Delegates to app.services.path_pattern.convert_pattern_to_regex, the
+        rule the Redis fast path also uses (DEV-680).
         """
-        # Check if this looks like a raw regex pattern (contains unescaped parentheses)
-        if '(' in path_pattern and ')' in path_pattern:
-            # Treat as raw regex, just ensure anchors
-            pattern = path_pattern
-            if not pattern.startswith("^"):
-                pattern = "^" + pattern
-            if not pattern.endswith("$"):
-                pattern = pattern + "$"
-            return pattern
-
-        # Escape special regex characters except *, ?, and :
-        pattern = re.escape(path_pattern)
-
-        # Handle path parameters like :id -> [^/]+
-        pattern = re.sub(r"\\:([a-zA-Z_][a-zA-Z0-9_]*)", r"(?P<\1>[^/]+)", pattern)
-
-        # Handle ** for multiple path segments
-        pattern = pattern.replace(r"\*\*", ".*")
-
-        # Handle * for single path segment
-        pattern = pattern.replace(r"\*", "[^/]*")
-
-        # Ensure exact match
-        if not pattern.startswith("^"):
-            pattern = "^" + pattern
-        if not pattern.endswith("$"):
-            pattern = pattern + "$"
-
-        return pattern
+        return convert_pattern_to_regex(path_pattern)
 
     def sync_all_mappings_to_redis(self, db: Session) -> bool:
         """

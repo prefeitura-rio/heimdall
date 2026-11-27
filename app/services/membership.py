@@ -6,11 +6,13 @@ Implements group membership operations with distributed tracing.
 from opentelemetry import trace
 from sqlalchemy.orm import Session
 
+from app.exceptions import GroupNotFoundError
 from app.models import Group, Membership, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
-from app.services.cerbos import CerbosService
+from app.services.cerbos import CerbosService, admin_action
+from app.tracing import subject_kind
 
 
 class MembershipService(BaseService):
@@ -35,8 +37,7 @@ class MembershipService(BaseService):
             "add_member_to_group",
             {
                 "membership.group_name": group_name,
-                "membership.member_subject": member_subject,
-                "membership.caller_subject": caller_subject,
+                "membership.caller": subject_kind(caller_subject),
                 "membership.operation": "add_member",
             },
         ) as span:
@@ -49,7 +50,7 @@ class MembershipService(BaseService):
                     can_add = self.cerbos_service.check_permission(
                         caller_subject=caller_subject,
                         caller_roles=caller_roles,
-                        action="group:add_member",
+                        action=admin_action("group:add_member"),
                         resource_type="group",
                         resource_attrs={"name": group_name},
                     )
@@ -78,6 +79,14 @@ class MembershipService(BaseService):
 
                 # Step 2: Database operations
                 with self.tracer.start_span("database_operations") as db_span:
+                    # Find group before any write: a missing group must not
+                    # leave an auto-created user behind. The GroupNotFoundError is
+                    # audited by the handler below and becomes a 404.
+                    group = db.query(Group).filter(Group.name == group_name).first()
+                    if not group:
+                        span.set_attribute("membership.group_not_found", True)
+                        raise GroupNotFoundError(group_name)
+
                     # Find or create user
                     user = db.query(User).filter(User.subject == member_subject).first()
                     if not user:
@@ -85,15 +94,6 @@ class MembershipService(BaseService):
                         db.add(user)
                         db.flush()  # Get user ID
                         db_span.set_attribute("membership.user_created", True)
-
-                    # Find group
-                    group = db.query(Group).filter(Group.name == group_name).first()
-                    if not group:
-                        span.set_attribute("membership.group_not_found", True)
-                        span.set_status(
-                            trace.Status(trace.StatusCode.ERROR, "Group not found")
-                        )
-                        return False
 
                     # Check if membership already exists
                     existing = (
@@ -215,8 +215,7 @@ class MembershipService(BaseService):
             "remove_member_from_group",
             {
                 "membership.group_name": group_name,
-                "membership.member_subject": member_subject,
-                "membership.caller_subject": caller_subject,
+                "membership.caller": subject_kind(caller_subject),
                 "membership.operation": "remove_member",
             },
         ) as span:
@@ -225,7 +224,7 @@ class MembershipService(BaseService):
                 can_remove = self.cerbos_service.check_permission(
                     caller_subject=caller_subject,
                     caller_roles=caller_roles,
-                    action="group:remove_member",
+                    action=admin_action("group:remove_member"),
                     resource_type="group",
                     resource_attrs={"name": group_name},
                 )
@@ -349,7 +348,7 @@ class MembershipService(BaseService):
             "list_group_members",
             {
                 "membership.group_name": group_name,
-                "membership.caller_subject": caller_subject,
+                "membership.caller": subject_kind(caller_subject),
                 "membership.operation": "list_members",
             },
         ) as span:
@@ -362,7 +361,7 @@ class MembershipService(BaseService):
                     can_view = self.cerbos_service.check_permission(
                         caller_subject=caller_subject,
                         caller_roles=caller_roles,
-                        action="group:view_members",
+                        action=admin_action("group:view_members"),
                         resource_type="group",
                         resource_attrs={"name": group_name},
                     )
@@ -378,7 +377,7 @@ class MembershipService(BaseService):
                     group = db.query(Group).filter(Group.name == group_name).first()
                     if not group:
                         group_span.set_attribute("group.found", False)
-                        raise ValueError(f"Group '{group_name}' not found")
+                        raise GroupNotFoundError(group_name)
 
                     group_span.set_attribute("group.found", True)
                     group_span.set_attribute("group.id", group.id)

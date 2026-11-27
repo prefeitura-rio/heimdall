@@ -12,7 +12,7 @@
     },
     {
       "name": "GO",
-      "openapi_url": "https://raw.githubusercontent.com/prefeitura-rio/app-go-api/refs/heads/staging/docs/openapi-v3.json",
+      "openapi_url": "https://raw.githubusercontent.com/prefeitura-rio/app-go-api/refs/heads/main/docs/openapi-v3.json",
       "additional_prefixes": ["/go"]
     },
     {
@@ -27,6 +27,6 @@
   },
   "options": {
     "auto_create_actions": true,
-    "delete_unmanaged": true
+    "delete_unmanaged": false
   }
 }

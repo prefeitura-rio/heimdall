@@ -9,16 +9,28 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden, require_admin_permission
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.exceptions import GroupNotFoundError
+from app.logging_config import get_structured_logger
 from app.models import User
 from app.services.action import ActionService
-from app.services.cerbos import CerbosService
+from app.services.cerbos import CerbosService, admin_action
 from app.services.role import RoleService
 from app.services.user import UserService
 
 router = APIRouter()
+
+logger = get_structured_logger(__name__)
+
+# Fixed 500 details: the error itself (driver message, SQL, constraint, key
+# values) goes to the masked log only, never to the response (DEV-626).
+LIST_ROLE_ACTIONS_FAILED_DETAIL = "Failed to retrieve role actions"
+ASSIGN_ROLE_ACTION_FAILED_DETAIL = "Failed to assign action to role"
+REMOVE_ROLE_ACTION_FAILED_DETAIL = "Failed to remove action from role"
+DELETE_ROLE_FAILED_DETAIL = "Failed to delete role"
 
 
 # Import ActionResponse from actions router
@@ -184,20 +196,32 @@ async def create_role(
     db: Annotated[Session, Depends(get_db)],
     role_service: Annotated[RoleService, Depends(lambda: RoleService())],
     user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
 ):
     """
-    Create a role (admin-only).
+    Create a role.
     Implements POST /roles as specified in SPEC.md Section 3.4.
+    Authorization is decided by Cerbos (action `heimdall:role:create` on resource `role`).
     """
-    # Get caller's roles for admin permission check
+    # Get caller's roles for Cerbos permission check
     caller_roles = user_service.get_user_roles(db, current_user)
 
-    # Check if user has admin privileges (simplified check)
-    has_admin = any(role in ["admin", "superadmin"] for role in caller_roles)
-    if not has_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required to create roles",
+    # Check permission to create this role using Cerbos
+    can_create = cerbos_service.can_create_role(
+        caller_subject=current_user.subject,
+        caller_roles=caller_roles,
+        role_name=role_data.name,
+    )
+
+    if not can_create:
+        raise forbidden(
+            db,
+            current_user,
+            operation="create_role",
+            detail=f"Permission denied to create role '{role_data.name}'",
+            target_type="role",
+            target_id=f"role:{role_data.name}",
+            request_payload=role_data.model_dump(),
         )
 
     # Create the role
@@ -232,7 +256,9 @@ async def create_role(
     description="""
 List all roles available in the system.
 
-**Authorization**: All authenticated users can list roles.
+**Authorization**: Requires admin privileges to list roles. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:role:list` permission is checked in Cerbos before any read.
 
 **Pagination**: Use `skip` and `limit` parameters to control pagination.
 Maximum limit is 100 roles per request.
@@ -283,6 +309,9 @@ Maximum limit is 100 roles per request.
                 }
             },
         },
+        403: {
+            "description": "Forbidden - Insufficient permissions to list roles (admin only)",
+        },
         500: {
             "description": "Internal server error",
             "content": {
@@ -296,14 +325,26 @@ Maximum limit is 100 roles per request.
     },
 )
 async def list_roles(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     role_service: Annotated[RoleService, Depends(lambda: RoleService())],
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
     skip: int = Query(0, ge=0, description="Number of items to skip"),
     limit: int = Query(
         50, ge=1, le=100, description="Maximum number of items to return"
     ),
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="role:list",
+        resource_type="role",
+        operation="list_roles",
+        detail="Permission denied to list roles",
+    )
     roles, total_count = role_service.list_roles(db=db, skip=skip, limit=limit)
 
     role_responses = [
@@ -420,15 +461,20 @@ async def list_group_roles(
     can_view = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="group:view_roles",
+        action=admin_action("group:view_roles"),
         resource_type="group",
         resource_attrs={"name": group_name},
     )
 
     if not can_view:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="view_group_roles",
             detail=f"Permission denied to view roles of group '{group_name}'",
+            target_type="group",
+            target_id=f"group:{group_name}",
+            request_payload={"group_name": group_name},
         )
 
     # Get group roles
@@ -446,9 +492,9 @@ async def list_group_roles(
             for role in roles
         ]
 
+    except GroupNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
@@ -477,9 +523,14 @@ async def assign_role_to_group(
     )
 
     if not can_assign:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="assign_role_to_group",
             detail=f"Permission denied to assign roles to group '{group_name}'",
+            target_type="role",
+            target_id=f"group:{group_name}:role:{assign_data.role_name}",
+            request_payload={"group_name": group_name, **assign_data.model_dump()},
         )
 
     # Assign role to group
@@ -537,9 +588,14 @@ async def remove_role_from_group(
     )
 
     if not can_remove:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="remove_role_from_group",
             detail=f"Permission denied to remove roles from group '{group_name}'",
+            target_type="role",
+            target_id=f"group:{group_name}:role:{role_name}",
+            request_payload={"group_name": group_name, "role_name": role_name},
         )
 
     # Remove role from group
@@ -602,7 +658,7 @@ Permissions are checked via Cerbos policies.
                         },
                         {
                             "id": 2,
-                            "name": "user:list",
+                            "name": "heimdall:user:list",
                             "description": "List users in the system",
                         },
                     ]
@@ -640,7 +696,7 @@ Permissions are checked via Cerbos policies.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to retrieve role actions: Policy service error"
+                        "detail": "Failed to retrieve role actions"
                     }
                 }
             },
@@ -664,22 +720,25 @@ async def list_role_actions(
     can_view = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:view_actions",
+        action=admin_action("role:view_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
 
     if not can_view:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="view_role_actions",
             detail=f"Permission denied to view actions for role '{role_name}'",
+            target_type="role",
+            target_id=f"role:{role_name}",
+            request_payload={"role_name": role_name},
         )
 
     # Check if role exists
     try:
-        roles, _ = role_service.list_roles(db)
-        role_exists = any(role.name == role_name for role in roles)
-        if not role_exists:
+        if role_service.get_role_by_name(db, role_name) is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Role '{role_name}' not found",
@@ -699,11 +758,14 @@ async def list_role_actions(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to retrieve role actions", extra={"operation": "list_role_actions"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve role actions: {str(e)}",
-        )
+            detail=LIST_ROLE_ACTIONS_FAILED_DETAIL,
+        ) from None
 
 
 @router.post(
@@ -780,7 +842,7 @@ Permissions are checked via Cerbos policies.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to assign action to role: Policy service error"
+                        "detail": "Failed to assign action to role"
                     }
                 }
             },
@@ -800,9 +862,14 @@ async def assign_action_to_role(
     """Add action permission to a role."""
     # Protect superadmin role from modification
     if role_name == "superadmin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="assign_action_to_role",
             detail="Cannot modify superadmin role: it is protected and has wildcard permissions",
+            target_type="role",
+            target_id=f"role:{role_name}:action:{action_data.action_name}",
+            request_payload={"role_name": role_name, **action_data.model_dump()},
         )
 
     # Get caller's roles for permission check
@@ -812,22 +879,25 @@ async def assign_action_to_role(
     can_modify = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:modify_actions",
+        action=admin_action("role:modify_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
 
     if not can_modify:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="assign_action_to_role",
             detail=f"Permission denied to modify actions for role '{role_name}'",
+            target_type="role",
+            target_id=f"role:{role_name}:action:{action_data.action_name}",
+            request_payload={"role_name": role_name, **action_data.model_dump()},
         )
 
     try:
         # Verify role exists
-        roles, _ = role_service.list_roles(db)
-        role_exists = any(role.name == role_name for role in roles)
-        if not role_exists:
+        if role_service.get_role_by_name(db, role_name) is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Role '{role_name}' not found",
@@ -866,11 +936,15 @@ async def assign_action_to_role(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to assign action to role",
+            extra={"operation": "assign_action_to_role"},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to assign action to role: {str(e)}",
-        )
+            detail=ASSIGN_ROLE_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.delete(
@@ -938,7 +1012,7 @@ Permissions are checked via Cerbos policies.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to remove action from role: Policy service error"
+                        "detail": "Failed to remove action from role"
                     }
                 }
             },
@@ -958,9 +1032,14 @@ async def remove_action_from_role(
     """Remove action permission from a role."""
     # Protect superadmin role from modification
     if role_name == "superadmin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="remove_action_from_role",
             detail="Cannot modify superadmin role: it is protected and has wildcard permissions",
+            target_type="role",
+            target_id=f"role:{role_name}:action:{action_name}",
+            request_payload={"role_name": role_name, "action_name": action_name},
         )
 
     # Get caller's roles for permission check
@@ -970,22 +1049,25 @@ async def remove_action_from_role(
     can_modify = cerbos_service.check_permission(
         caller_subject=current_user.subject,
         caller_roles=caller_roles,
-        action="role:modify_actions",
+        action=admin_action("role:modify_actions"),
         resource_type="role",
         resource_attrs={"name": role_name},
     )
 
     if not can_modify:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="remove_action_from_role",
             detail=f"Permission denied to modify actions for role '{role_name}'",
+            target_type="role",
+            target_id=f"role:{role_name}:action:{action_name}",
+            request_payload={"role_name": role_name, "action_name": action_name},
         )
 
     try:
         # Verify role exists
-        roles, _ = role_service.list_roles(db)
-        role_exists = any(role.name == role_name for role in roles)
-        if not role_exists:
+        if role_service.get_role_by_name(db, role_name) is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Role '{role_name}' not found",
@@ -1019,11 +1101,15 @@ async def remove_action_from_role(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to remove action from role",
+            extra={"operation": "remove_action_from_role"},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to remove action from role: {str(e)}",
-        )
+            detail=REMOVE_ROLE_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.delete(
@@ -1084,7 +1170,7 @@ Permissions are checked via Cerbos policies.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to delete role: Database transaction error"
+                        "detail": "Failed to delete role"
                     }
                 }
             },
@@ -1104,34 +1190,45 @@ async def delete_role(
         # Get caller's roles for permission check
         caller_roles = user_service.get_user_roles(db, current_user)
 
-        # Check if role exists
-        role = role_service.get_role_by_name(db, role_name)
-        if not role:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Role '{role_name}' not found",
-            )
-
         # Protect superadmin role from deletion
         if role_name == "superadmin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="delete_role",
                 detail="Cannot delete superadmin role: it is protected and immutable",
+                target_type="role",
+                target_id=f"role:{role_name}",
+                request_payload={"role_name": role_name},
             )
 
         # Check permission to delete this role
         is_allowed = cerbos_service.check_permission(
             caller_subject=current_user.subject,
             caller_roles=caller_roles,
-            action="role:delete",
+            action=admin_action("role:delete"),
             resource_type="role",
             resource_attrs={"name": role_name},
         )
 
         if not is_allowed:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="delete_role",
                 detail=f"Permission denied to delete role '{role_name}'",
+                target_type="role",
+                target_id=f"role:{role_name}",
+                request_payload={"role_name": role_name},
+            )
+
+        # Check if role exists only after authorization, so a caller without
+        # heimdall:role:delete cannot tell existing roles from missing ones (403 for both)
+        role = role_service.get_role_by_name(db, role_name)
+        if not role:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Role '{role_name}' not found",
             )
 
         # Check if role is still assigned to groups (safety check)
@@ -1144,7 +1241,7 @@ async def delete_role(
             )
 
         # Delete the role
-        role_service.delete_role(db, role_name)
+        role_service.delete_role(db, role_name, deleted_by=current_user)
 
         # Invalidate policy version to trigger near real-time sync
         from app.services.policy_invalidator import invalidate_policy_version
@@ -1155,8 +1252,11 @@ async def delete_role(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to delete role", extra={"operation": "delete_role"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete role: {str(e)}",
-        )
+            detail=DELETE_ROLE_FAILED_DETAIL,
+        ) from None

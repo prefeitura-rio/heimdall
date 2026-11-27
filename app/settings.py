@@ -8,15 +8,28 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-import psycopg2
-import redis
-import requests
-
 
 class ConfigValidationError(Exception):
     """Raised when environment configuration validation fails."""
 
     pass
+
+
+def parse_cors_allowed_origins(raw: str | None) -> list[str]:
+    """
+    Parse a comma-separated CORS origin allowlist.
+
+    Entries are trimmed and lose any trailing slash; empty entries and the
+    wildcard "*" are ignored on purpose, so the allowlist can never open the
+    API to every origin. An unset or empty value allows no cross-origin caller.
+    """
+    origins: list[str] = []
+    for entry in (raw or "").split(","):
+        origin = entry.strip().rstrip("/")
+        if not origin or origin == "*" or origin in origins:
+            continue
+        origins.append(origin)
+    return origins
 
 
 class Settings:
@@ -62,11 +75,15 @@ class Settings:
 
         # Background Task Configuration
         self.RECONCILE_INTERVAL_SECONDS: int = int(os.getenv("RECONCILE_INTERVAL_SECONDS", "300"))
-        self.SYNC_RETRY_INTERVAL_SECONDS: int = int(os.getenv("SYNC_RETRY_INTERVAL_SECONDS", "60"))
 
         # Server Configuration
         self.HOST: str = os.getenv("HOST", "0.0.0.0")
         self.PORT: int = int(os.getenv("PORT", "8080"))
+
+        # CORS: comma-separated allowlist of browser origins (empty = none)
+        self.CORS_ALLOWED_ORIGINS: list[str] = parse_cors_allowed_origins(
+            os.getenv("CORS_ALLOWED_ORIGINS")
+        )
 
         # OpenTelemetry Tracing
         self.OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "heimdall-admin-service")
@@ -133,10 +150,6 @@ class Settings:
     def get_reconcile_interval(self) -> int:
         """Get the reconciliation interval in seconds."""
         return self.RECONCILE_INTERVAL_SECONDS
-
-    def get_sync_retry_interval(self) -> int:
-        """Get the sync retry interval in seconds."""
-        return self.SYNC_RETRY_INTERVAL_SECONDS
 
     def validate(self) -> None:
         """
@@ -214,9 +227,13 @@ class Settings:
             ),
             ("OTEL_RESOURCE_ATTRIBUTES", "OpenTelemetry resource attributes", ""),
             ("RECONCILE_INTERVAL_SECONDS", "Background reconciliation interval (with UUID change detection)", "2"),
-            ("SYNC_RETRY_INTERVAL_SECONDS", "Sync retry interval", "60"),
             ("HOST", "Server host address", "0.0.0.0"),
             ("PORT", "Server port", "8080"),
+            (
+                "CORS_ALLOWED_ORIGINS",
+                "Comma-separated allowlist of CORS origins (wildcard ignored)",
+                "",
+            ),
         ]
 
     def _validate_required_variables(self) -> list[str]:
@@ -429,7 +446,6 @@ class Settings:
             ("REDIS_USER_ROLES_TTL", self.REDIS_USER_ROLES_TTL, 1, 3600),  # 1 second to 1 hour
             ("REDIS_JWKS_TTL", self.REDIS_JWKS_TTL, 60, 86400),  # 1 minute to 1 day
             ("RECONCILE_INTERVAL_SECONDS", self.RECONCILE_INTERVAL_SECONDS, 1, 86400),  # 1 second to 1 day (UUID change detection allows very frequent checks)
-            ("SYNC_RETRY_INTERVAL_SECONDS", self.SYNC_RETRY_INTERVAL_SECONDS, 10, 3600),  # 10 seconds to 1 hour
             ("PORT", self.PORT, 1, 65535),  # Valid port range
         ]
 
@@ -544,9 +560,9 @@ class Settings:
             "OTEL_SERVICE_NAME": self.OTEL_SERVICE_NAME,
             "OTEL_RESOURCE_ATTRIBUTES": self.OTEL_RESOURCE_ATTRIBUTES,
             "RECONCILE_INTERVAL_SECONDS": self.RECONCILE_INTERVAL_SECONDS,
-            "SYNC_RETRY_INTERVAL_SECONDS": self.SYNC_RETRY_INTERVAL_SECONDS,
             "HOST": self.HOST,
             "PORT": self.PORT,
+            "CORS_ALLOWED_ORIGINS": ",".join(self.CORS_ALLOWED_ORIGINS),
         }
 
         for var_name, _, default in self._get_optional_variables():
@@ -554,137 +570,6 @@ class Settings:
             config_summary[var_name] = value
 
         return config_summary
-
-    def validate_runtime_connectivity(self) -> dict[str, bool]:
-        """
-        Validate runtime connectivity to external services.
-        Returns dict of service -> connectivity status.
-        """
-        connectivity_status = {}
-
-        # Test database connection
-        connectivity_status["database"] = self._test_database_connection()
-
-        # Test Redis connection
-        connectivity_status["redis"] = self._test_redis_connection()
-
-        # Test Cerbos connection
-        connectivity_status["cerbos"] = self._test_cerbos_connection()
-
-        # Test Keycloak JWKS endpoint
-        connectivity_status["keycloak_jwks"] = self._test_keycloak_jwks_connection()
-
-        # Test OTEL collector (if configured)
-        connectivity_status["otel_collector"] = self._test_otel_connection()
-
-        return connectivity_status
-
-    def _test_database_connection(self) -> bool:
-        """Test PostgreSQL database connectivity."""
-        try:
-            db_url = self.DATABASE_URL
-            if not db_url:
-                return False
-
-            # Parse URL and test connection
-            conn = psycopg2.connect(db_url)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-            cursor.close()
-            conn.close()
-            return True
-
-        except Exception as e:
-            self._log_connectivity_error("database", e)
-            return False
-
-    def _test_redis_connection(self) -> bool:
-        """Test Redis connectivity."""
-        try:
-            redis_url = self.REDIS_URL
-
-            # Create Redis client and test connection
-            r = redis.from_url(redis_url)
-            r.ping()
-            r.close()
-            return True
-
-        except Exception as e:
-            self._log_connectivity_error("redis", e)
-            return False
-
-    def _test_cerbos_connection(self) -> bool:
-        """Test Cerbos connectivity."""
-        try:
-            cerbos_base_url = self.CERBOS_BASE_URL
-            if not cerbos_base_url:
-                return False
-
-            # Test Cerbos health endpoint
-            health_url = f"{cerbos_base_url.rstrip('/')}/api/cerbos/version"
-            response = requests.get(health_url, timeout=5)
-            response.raise_for_status()
-            return True
-
-        except Exception as e:
-            self._log_connectivity_error("cerbos", e)
-            return False
-
-    def _test_keycloak_jwks_connection(self) -> bool:
-        """Test Keycloak JWKS endpoint connectivity."""
-        try:
-            jwks_url = self.KEYCLOAK_JWKS_URL
-            if not jwks_url:
-                return False
-
-            # Test JWKS endpoint
-            response = requests.get(jwks_url, timeout=5)
-            response.raise_for_status()
-
-            # Verify it returns valid JSON with keys
-            jwks_data = response.json()
-            return "keys" in jwks_data
-
-        except Exception as e:
-            self._log_connectivity_error("keycloak_jwks", e)
-            return False
-
-    def _test_otel_connection(self) -> bool:
-        """Test OpenTelemetry collector connectivity."""
-        try:
-            otel_endpoint = self.OTEL_EXPORTER_OTLP_ENDPOINT
-            if not otel_endpoint:
-                # OTEL is optional, so return True if not configured
-                return True
-
-            # Test OTEL collector endpoint (usually HTTP)
-            # Note: This is a basic connectivity test, not a full OTLP export
-            response = requests.get(otel_endpoint, timeout=5)
-            # Don't raise_for_status() as OTEL endpoints may return different codes
-            return response.status_code < 500
-
-        except Exception as e:
-            self._log_connectivity_error("otel_collector", e)
-            return False
-
-    def _log_connectivity_error(self, service: str, error: Exception) -> None:
-        """Log connectivity errors using structured logging if available."""
-        try:
-            from app.logging_config import get_structured_logger
-            logger = get_structured_logger(__name__)
-            logger.log_operation(
-                level=30,  # WARNING
-                message=f"{service.title()} connectivity test failed",
-                operation=f"connectivity_test_{service}",
-                extra_fields={"error": str(error), "exception_type": type(error).__name__},
-            )
-        except ImportError:
-            # Fallback to basic logging if structured logging not available
-            import logging
-            logging.basicConfig(level=logging.INFO)
-            logger = logging.getLogger(__name__)
-            logger.warning(f"{service} connectivity test failed: {error}")
 
 
 # Global settings instance
@@ -695,30 +580,3 @@ settings = Settings()
 def validate_environment() -> None:
     """Validate environment configuration and raise if invalid."""
     settings.validate()
-
-
-def get_env_var(
-    name: str, default: str | None = None, required: bool = False
-) -> str | None:
-    """
-    Get environment variable with validation.
-
-    Args:
-        name: Environment variable name
-        default: Default value if not set
-        required: Whether the variable is required
-
-    Returns:
-        Environment variable value or default
-
-    Raises:
-        ConfigValidationError: If required variable is not set
-    """
-    value = os.getenv(name, default)
-
-    if required and not value:
-        raise ConfigValidationError(
-            f"Required environment variable '{name}' is not set"
-        )
-
-    return value

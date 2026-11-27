@@ -10,9 +10,71 @@ from typing import Any
 import requests
 from opentelemetry import trace
 
-from app.exceptions import CerbosUnavailableError
+from app.exceptions import CerbosResponseError, CerbosUnavailableError
 from app.services.base import BaseService
 from app.settings import settings
+from app.tracing import redact_cpf, subject_kind
+
+# Reserved namespace of Heimdall's own administrative actions (DEV-556).
+# Application roles use free-form action names shared with the route
+# mappings, so an app action could be called "user:list" or "group:create".
+# The admin routes therefore check "heimdall:<action>" instead, and the
+# principal policy grants that namespace only on the admin resources.
+ADMIN_ACTION_PREFIX = "heimdall:"
+
+# Resource kinds the admin routes check. None of the applications that
+# check Cerbos uses them (ext-authz: "generic"; go-api: "proposta",
+# "oportunidade", "document", "resource"...).
+ADMIN_RESOURCE_TYPES: tuple[str, ...] = (
+    "group",
+    "user",
+    "role",
+    "action",
+    "mapping",
+    "membership",
+)
+
+# Every administrative action an admin route checks, without the prefix.
+# This is also the list the startup backfill (app/services/admin_actions.py)
+# migrates from the legacy un-prefixed names.
+ADMIN_ACTIONS: tuple[str, ...] = (
+    "action:create",
+    "action:delete",
+    "action:list",
+    "action:read",
+    "action:update",
+    "group:add_member",
+    "group:assign_role",
+    "group:create",
+    "group:delete",
+    "group:list",
+    "group:remove_member",
+    "group:remove_role",
+    "group:view_members",
+    "group:view_roles",
+    "mapping:create",
+    "mapping:delete",
+    "mapping:list",
+    "mapping:update",
+    "role:create",
+    "role:delete",
+    "role:list",
+    "role:modify_actions",
+    "role:view_actions",
+    "user:list",
+)
+
+
+def admin_action(name: str) -> str:
+    """Name an admin route checks in Cerbos for the admin action `name`."""
+    if name not in ADMIN_ACTIONS:
+        raise ValueError(f"Unknown admin action: {name}")
+    return f"{ADMIN_ACTION_PREFIX}{name}"
+
+
+def is_admin_action(name: str) -> bool:
+    """Whether an action name belongs to the reserved admin namespace."""
+    return name.startswith(ADMIN_ACTION_PREFIX)
 
 
 class CerbosService(BaseService):
@@ -95,7 +157,7 @@ class CerbosService(BaseService):
             {
                 "cerbos.action": action,
                 "cerbos.resource_type": resource_type,
-                "cerbos.caller_subject": caller_subject,
+                "cerbos.caller": subject_kind(caller_subject),
                 "cerbos.caller_roles_count": len(caller_roles),
             },
         ) as span:
@@ -141,9 +203,11 @@ class CerbosService(BaseService):
                     span.set_attribute("cerbos.missing_results_field", True)
                     if "error" in resp_data:
                         span.set_attribute("cerbos.error_response", resp_data["error"])
-                        raise ValueError(f"Cerbos error: {resp_data['error']}")
+                        raise CerbosResponseError(f"Cerbos error: {resp_data['error']}")
                     else:
-                        raise ValueError(f"Unexpected Cerbos response format: {resp_data}")
+                        raise CerbosResponseError(
+                            f"Unexpected Cerbos response format: {resp_data}"
+                        )
 
                 # Cerbos API returns results[0].actions[action] format
                 result = resp_data["results"][0]["actions"][action]
@@ -214,7 +278,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:create",
+            action=admin_action("group:create"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -226,7 +290,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:delete",
+            action=admin_action("group:delete"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -238,7 +302,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:add_member",
+            action=admin_action("group:add_member"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -250,7 +314,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:remove_member",
+            action=admin_action("group:remove_member"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -262,7 +326,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:assign_role",
+            action=admin_action("group:assign_role"),
             resource_type="group",
             resource_attrs={"name": group_name},
         )
@@ -274,9 +338,21 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="group:remove_role",
+            action=admin_action("group:remove_role"),
             resource_type="group",
             resource_attrs={"name": group_name},
+        )
+
+    def can_create_role(
+        self, caller_subject: str, caller_roles: list[str], role_name: str
+    ) -> bool:
+        """Check if caller can create a role."""
+        return self.check_permission(
+            caller_subject=caller_subject,
+            caller_roles=caller_roles,
+            action=admin_action("role:create"),
+            resource_type="role",
+            resource_attrs={"name": role_name},
         )
 
     def can_create_mapping(
@@ -286,7 +362,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="mapping:create",
+            action=admin_action("mapping:create"),
             resource_type="mapping",
             resource_attrs={"action": action_name},
         )
@@ -298,7 +374,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="mapping:update",
+            action=admin_action("mapping:update"),
             resource_type="mapping",
             resource_attrs={"id": str(mapping_id)},
         )
@@ -310,7 +386,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="mapping:delete",
+            action=admin_action("mapping:delete"),
             resource_type="mapping",
             resource_attrs={"id": str(mapping_id)},
         )
@@ -322,7 +398,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="action:create",
+            action=admin_action("action:create"),
             resource_type="action",
             resource_attrs={"name": action_name},
         )
@@ -334,7 +410,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="action:update",
+            action=admin_action("action:update"),
             resource_type="action",
             resource_attrs={"id": str(action_id)},
         )
@@ -346,7 +422,7 @@ class CerbosService(BaseService):
         return self.check_permission(
             caller_subject=caller_subject,
             caller_roles=caller_roles,
-            action="action:delete",
+            action=admin_action("action:delete"),
             resource_type="action",
             resource_attrs={"id": str(action_id)},
         )
@@ -368,10 +444,10 @@ class CerbosService(BaseService):
 
         # Check if user has superadmin role - if so, grant everything
         if "superadmin" in user_roles:
-            action_rules = [
+            rules = [
                 {
-                    "action": "*",
-                    "effect": "EFFECT_ALLOW"
+                    "resource": "*",
+                    "actions": [{"action": "*", "effect": "EFFECT_ALLOW"}],
                 }
             ]
         else:
@@ -392,38 +468,51 @@ class CerbosService(BaseService):
             finally:
                 session.close()
 
-            # Convert actions to Cerbos rule format
-            if all_actions:
-                action_rules = [
-                    {
-                        "action": action_name,
-                        "effect": "EFFECT_ALLOW"
-                    }
-                    for action_name in sorted(all_actions)
-                ]
-            else:
-                # If no actions assigned, deny everything
-                action_rules = [
-                    {
-                        "action": "*",
-                        "effect": "EFFECT_DENY"
-                    }
-                ]
+            rules = self._role_action_rules(all_actions)
 
         return {
             "apiVersion": "api.cerbos.dev/v1",
             "principalPolicy": {
                 "principal": user_subject,
                 "version": "default",
-                "rules": [
-                    {
-                        "resource": "*",
-                        "actions": action_rules
-                    }
-                ]
+                "rules": rules,
             },
             "metadata": {"storeIdentifier": policy_id},
         }
+
+    @staticmethod
+    def _role_action_rules(action_names: set[str]) -> list[dict[str, Any]]:
+        """
+        Principal policy rules for the actions of a non-superadmin user (DEV-556).
+
+        Every action of the user is allowed on every resource, but on the
+        admin resources only the reserved "heimdall:" actions stay allowed:
+        the application actions are explicitly denied there (Cerbos: DENY wins
+        over the ALLOW of the "*" rule). "heimdall:" actions stay allowed on
+        "*" so the gateway (ext_authz, kind "generic") can map Heimdall's own
+        routes to them.
+        """
+        if not action_names:
+            return [{"resource": "*", "actions": [{"action": "*", "effect": "EFFECT_DENY"}]}]
+
+        rules: list[dict[str, Any]] = [
+            {
+                "resource": "*",
+                "actions": [
+                    {"action": name, "effect": "EFFECT_ALLOW"} for name in sorted(action_names)
+                ],
+            }
+        ]
+        app_actions = sorted(name for name in action_names if not is_admin_action(name))
+        if app_actions:
+            rules.extend(
+                {
+                    "resource": resource_type,
+                    "actions": [{"action": name, "effect": "EFFECT_DENY"} for name in app_actions],
+                }
+                for resource_type in ADMIN_RESOURCE_TYPES
+            )
+        return rules
 
     def push_user_policy(self, user_subject: str, user_roles: list[str]) -> bool:
         """
@@ -433,7 +522,6 @@ class CerbosService(BaseService):
         with self.trace_operation(
             "push_user_policy",
             {
-                "cerbos.user_subject": user_subject,
                 "cerbos.roles_count": len(user_roles),
                 "cerbos.operation": "push_policy",
             },
@@ -443,7 +531,7 @@ class CerbosService(BaseService):
                 policy_data = self.build_principal_policy(user_subject, user_roles)
                 policy_id = policy_data["metadata"]["storeIdentifier"]
 
-                span.set_attribute("cerbos.policy_id", policy_id)
+                span.set_attribute("cerbos.policy_id", redact_cpf(policy_id))
                 span.set_attribute("cerbos.user_roles", user_roles)
 
                 # Push policy with retry using correct Cerbos format
@@ -578,13 +666,13 @@ class CerbosService(BaseService):
         """Delete user policy from Cerbos Admin API."""
         with self.trace_operation(
             "delete_user_policy",
-            {"cerbos.user_subject": user_subject, "cerbos.operation": "delete_policy"},
+            {"cerbos.operation": "delete_policy"},
         ) as span:
             try:
                 policy_id = (
                     f"principal_{user_subject.replace(':', '_').replace('@', '_at_')}"
                 )
-                span.set_attribute("cerbos.policy_id", policy_id)
+                span.set_attribute("cerbos.policy_id", redact_cpf(policy_id))
 
                 # Delete policy with retry
                 def _make_delete_request():
@@ -618,129 +706,6 @@ class CerbosService(BaseService):
                 span.set_attribute("cerbos.policy_deleted", False)
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
                 raise
-
-    def sync_affected_users_policies(self, db_session, role_name: str) -> int:
-        """
-        Sync Cerbos policies for all users affected by changes to a specific role.
-        Returns the number of users whose policies were successfully synced.
-        """
-        from app.models import GroupRole, Membership, Role, User
-        from app.services.user import UserService
-
-        with self.trace_operation(
-            "sync_affected_users_policies",
-            {"role_name": role_name, "operation": "immediate_policy_sync"}
-        ) as span:
-            try:
-                user_service = UserService()
-
-                # Find all users who have this role (through group membership)
-                affected_users = (
-                    db_session.query(User)
-                    .join(Membership, User.id == Membership.user_id)
-                    .join(GroupRole, Membership.group_id == GroupRole.group_id)
-                    .join(Role, GroupRole.role_id == Role.id)
-                    .filter(Role.name == role_name)
-                    .distinct()
-                    .all()
-                )
-
-                span.set_attribute("affected_users_count", len(affected_users))
-
-                synced_count = 0
-                failed_count = 0
-
-                for user in affected_users:
-                    try:
-                        # Get user's current roles
-                        user_roles = user_service.get_user_roles(db_session, user)
-
-                        # Sync the user's policy to Cerbos
-                        success = self.push_user_policy(
-                            user_subject=user.subject,
-                            user_roles=user_roles
-                        )
-
-                        if success:
-                            synced_count += 1
-                        else:
-                            failed_count += 1
-
-                    except Exception as e:
-                        failed_count += 1
-                        span.record_exception(e)
-
-                span.set_attribute("users_synced", synced_count)
-                span.set_attribute("users_failed", failed_count)
-
-                return synced_count
-
-            except Exception as e:
-                span.record_exception(e)
-                span.set_attribute("sync_error", str(e))
-                span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-                return 0
-
-    def sync_group_users_policies(self, db_session, group_name: str) -> int:
-        """
-        Sync Cerbos policies for all users who are members of a specific group.
-        Returns the number of users whose policies were successfully synced.
-        """
-        from app.models import Membership, User
-        from app.services.user import UserService
-
-        with self.trace_operation(
-            "sync_group_users_policies",
-            {"group_name": group_name, "operation": "immediate_policy_sync"}
-        ) as span:
-            try:
-                user_service = UserService()
-
-                # Find all users who are members of this group
-                affected_users = (
-                    db_session.query(User)
-                    .join(Membership, User.id == Membership.user_id)
-                    .join(Membership.group)
-                    .filter(Membership.group.has(name=group_name))
-                    .distinct()
-                    .all()
-                )
-
-                span.set_attribute("affected_users_count", len(affected_users))
-
-                synced_count = 0
-                failed_count = 0
-
-                for user in affected_users:
-                    try:
-                        # Get user's current roles
-                        user_roles = user_service.get_user_roles(db_session, user)
-
-                        # Sync the user's policy to Cerbos
-                        success = self.push_user_policy(
-                            user_subject=user.subject,
-                            user_roles=user_roles
-                        )
-
-                        if success:
-                            synced_count += 1
-                        else:
-                            failed_count += 1
-
-                    except Exception as e:
-                        failed_count += 1
-                        span.record_exception(e)
-
-                span.set_attribute("users_synced", synced_count)
-                span.set_attribute("users_failed", failed_count)
-
-                return synced_count
-
-            except Exception as e:
-                span.record_exception(e)
-                span.set_attribute("sync_error", str(e))
-                span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-                return 0
 
     def health_check(self) -> bool:
         """

@@ -51,6 +51,8 @@ spec:
               value: "https://auth-idrio.apps.rio.gov.br/auth/realms/idrio_cidadao"
             - name: ENABLE_BACKGROUND_TASKS
               value: "false"
+            - name: CORS_ALLOWED_ORIGINS
+              value: "https://pref.rio,https://admin.pref.rio"
           envFrom:
             - secretRef:
                 name: heimdall-admin-secrets

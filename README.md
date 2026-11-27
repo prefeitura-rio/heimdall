@@ -60,7 +60,7 @@ A comprehensive admin service for group and role management with Cerbos authoriz
 - **Redis Caching**: High-performance caching for mappings, roles, and JWKS
 - **Database Monitoring**: Real-time query performance monitoring and optimization
 - **Health Monitoring**: Comprehensive health checks for all dependencies
-- **Background Tasks**: Automated reconciliation and retry mechanisms
+- **Background Tasks**: Automated reconciliation of Cerbos policies
 - **Security**: JWT verification, static API tokens, input validation
 
 ## 🏗️ Architecture
@@ -116,7 +116,6 @@ All configuration is done via environment variables. Copy [`.env.example`](.env.
 | `REDIS_JWKS_TTL` | ❌ | `300` | JWKS cache TTL in seconds |
 | **Background Tasks** |
 | `RECONCILE_INTERVAL_SECONDS` | ❌ | `300` | Cerbos policy reconciliation interval |
-| `SYNC_RETRY_INTERVAL_SECONDS` | ❌ | `60` | Failed sync retry interval |
 | **Server** |
 | `HOST` | ❌ | `0.0.0.0` | Server bind address |
 | `PORT` | ❌ | `8080` | Server port |
@@ -198,8 +197,8 @@ curl -H "Authorization: Bearer <static-token>" http://localhost:8000/api/v1/mapp
 #### Roles
 - `POST /api/v1/roles` - Create a new role
 - `GET /api/v1/roles` - List all roles
-- `POST /api/v1/groups/{groupName}/roles` - Assign role to group
-- `DELETE /api/v1/groups/{groupName}/roles/{roleName}` - Remove role from group
+- `POST /api/v1/roles/groups/{groupName}/roles` - Assign role to group
+- `DELETE /api/v1/roles/groups/{groupName}/roles/{roleName}` - Remove role from group
 
 #### Mappings
 - `GET /api/v1/mappings` - Resolve path/method to action
@@ -211,10 +210,6 @@ curl -H "Authorization: Bearer <static-token>" http://localhost:8000/api/v1/mapp
 #### Health & Monitoring
 - `GET /api/v1/healthz` - Basic health check
 - `GET /api/v1/readyz` - Readiness check with dependency validation
-- `GET /api/v1/version` - Service version information
-- `GET /api/v1/metrics` - System and cache metrics
-- `GET /api/v1/config` - Configuration summary (safe)
-- `GET /api/v1/database` - Database performance metrics
 
 ### Interactive Documentation
 
@@ -259,8 +254,7 @@ curl -H "Authorization: Bearer <static-token>" http://localhost:8000/api/v1/mapp
 ### Health Monitoring
 - **Dependency Checks**: Real-time health checks for PostgreSQL, Redis, Cerbos
 - **Performance Metrics**: System resource utilization monitoring
-- **Database Performance**: Query performance tracking and optimization suggestions
-- **Cache Statistics**: Redis performance and hit rate monitoring
+- **Database Performance**: Query performance tracking and slow query logging
 
 ## 🔄 Background Tasks
 
@@ -271,10 +265,68 @@ The background service runs automated maintenance tasks:
 - **Configurable Interval**: Default every 5 minutes, configurable via environment
 - **Error Handling**: Comprehensive error tracking and retry logic
 
-### Retry Mechanisms
-- **Failed Operations**: Automatic retry of failed Cerbos operations
-- **Exponential Backoff**: Smart retry timing to avoid overwhelming services
-- **Alert Generation**: Logging for permanently failed operations
+### Retry of failed Cerbos pushes
+- **No separate retry job**: a run with any failed user does not mark the policy
+  version as synced, so the next reconciliation run walks the users again and
+  re-pushes every user whose last push did not succeed
+
+## 🗺️ Versioned Endpoint Mappings
+
+The endpoint-to-action mappings of an application can be versioned in this
+repository instead of being created by hand through the admin API. Today the
+go-api ([`mappings/go-api.json`](mappings/go-api.json)) and the app-rmi
+([`mappings/app-rmi.json`](mappings/app-rmi.json), prefix `/rmi/v1/`) have one.
+
+### File format
+- `path_prefix`: every route of the file must start with it (`/go/` for the go-api).
+- `mappings`: one entry per route, `method` + OpenAPI-style `path`
+  (`/go/api/v1/empresas/{id}`; the regex is generated, `{param}` becomes
+  `([^/]+)` and `$` is appended, as `scripts/manage_openapi_mappings.py` does),
+  and exactly one of:
+  - `action`: the action name. `public` lets the request through the edge
+    without a token; `authenticated` only requires a valid JWT; any other
+    action is checked against Cerbos (see `prefeitura-rio/cerbos-ext-authz`).
+  - `same_as`: `{method, path}` of another route; the route gets the action the
+    database maps to that route when the sync runs. Use it when the action
+    name is only known by the database (it fails if that route has no mapping).
+- `remove`: routes whose mapping must not exist. Nothing is ever deleted
+  unless listed here, and only inside `path_prefix`.
+
+### Plan (dry run) and apply
+```bash
+# Read-only: what would be created (+), changed (~) and deleted (-)
+uv run python -m app.mappings_sync plan --file mappings/go-api.json
+
+# Same plan, then applied (idempotent: a second run changes nothing)
+uv run python -m app.mappings_sync apply --file mappings/go-api.json
+```
+Both use `DB_DSN` and `REDIS_URL` of the target Heimdall and write through the
+same service as the admin API (database, Redis read by the edge, audit log as
+`system:mappings_sync`). The run aborts before any write, with the reason, when
+an action does not exist, a `same_as` resolves to no action or to two, or an
+existing pattern of another route also matches a declared route with a
+different action. Exit codes: `0` ok, `1` invalid file, `2` plan errors (nothing
+written), `3` some writes failed (rerun to converge).
+
+### Staging
+The `mappings-sync` initContainer of `heimdall-admin` (`k8s/staging`) runs
+`apply` after the migrations on every rollout, so a merge to `staging` that
+changes the file is applied by the normal deploy. Its output is the plan and
+the result: `kubectl -n heimdall logs deploy/heimdall-admin -c mappings-sync`.
+`mappings/app-rmi.json` is applied the same way by the next initContainer,
+`mappings-sync-app-rmi` (`-c mappings-sync-app-rmi` for its log).
+If it fails, the new pods stay in `Init` and the previous ones keep serving.
+
+### Production
+Production (`k8s/prod`, branch `main`) does not run the sync yet. To enable it:
+1. With read access to the production database, run `plan` against it and check
+   the output: every `same_as` must resolve and no error may be listed.
+2. Open a PR to `main` adding the same `mappings-sync` initContainer to
+   `k8s/prod/resources.yaml` (image `:stable`). When it is promoted, every
+   rollout applies the file; the initContainer log shows what changed.
+3. Rollback: revert that PR (the sync stops) and, if needed, restore the
+   previous action of a mapping with `PUT /api/v1/mappings/{id}`; the plan
+   output lists the ids and the old actions.
 
 ## 🧪 Development
 
@@ -406,12 +458,10 @@ redis-cli -u $REDIS_URL monitor
 ### Performance Optimization
 
 **Database Performance**
-- Monitor slow queries via `/api/v1/database` endpoint
-- Review optimization suggestions provided by the monitoring service
+- Monitor slow queries in the structured logs (`operation: slow_query`, queries over 1s)
 - Use database indexes added for common query patterns
 
 **Cache Performance**  
-- Monitor cache hit rates via `/api/v1/metrics` endpoint
 - Adjust TTL values via environment variables if needed
 - Monitor Redis memory usage
 

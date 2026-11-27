@@ -5,11 +5,52 @@ Implements JSON structured logging with OpenTelemetry trace context.
 
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from typing import Any
 
 from opentelemetry import trace
+
+from app.tracing import redact_cpf
+
+# The ``DETAIL`` line of a PostgreSQL constraint error carries the offending key
+# value: ``DETAIL:  Key (subject)=(<CPF>) already exists.`` or ``DETAIL:  Key
+# (user_id)=(5) is not present in table "users".``. The value runs up to the
+# last ``)`` of the line followed by a space, a period or the end of the line, so
+# a value that itself contains ``) `` is hidden whole. Anchored at the start of
+# a line so that each line is scanned at most once: logged text (a request URL,
+# a validation error) can be large and hostile, and the match must stay linear.
+_PG_KEY_VALUE_PATTERN = re.compile(
+    r"^([ \t]*DETAIL:[ \t]+Key \([^)\n]*\)=\().*(\)(?=[\s.]|$))", re.MULTILINE
+)
+KEY_VALUE_PLACEHOLDER = "[redacted]"
+
+# Loggers uvicorn configures with handlers of its own (``uvicorn.config.LOGGING_CONFIG``).
+UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.asgi")
+
+
+def redact_log_value(value: Any) -> Any:
+    """Mask personal data that error messages bring into a log entry (DEV-554).
+
+    Database driver messages reach the logs through ``str(e)`` and tracebacks
+    even with ``hide_parameters=True``: the PostgreSQL ``DETAIL`` line quotes the
+    key value that violated a constraint, which for ``users.subject`` is the
+    citizen's CPF. Strings get the key value hidden (only the column names stay)
+    and any CPF-shaped value masked; dicts, lists and tuples are walked; any other
+    value is returned unchanged.
+    """
+    if isinstance(value, str):
+        return redact_cpf(
+            _PG_KEY_VALUE_PATTERN.sub(rf"\g<1>{KEY_VALUE_PLACEHOLDER}\g<2>", value)
+        )
+    if isinstance(value, dict):
+        return {
+            redact_log_value(key): redact_log_value(item) for key, item in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [redact_log_value(item) for item in value]
+    return value
 
 
 class StructuredFormatter(logging.Formatter):
@@ -33,7 +74,7 @@ class StructuredFormatter(logging.Formatter):
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": redact_log_value(record.getMessage()),
             "service": self.service_name,
         }
 
@@ -49,41 +90,39 @@ class StructuredFormatter(logging.Formatter):
 
         # Add extra fields from record
         if hasattr(record, "extra_fields"):
-            log_entry.update(record.extra_fields)
+            log_entry.update(redact_log_value(record.extra_fields))
 
-        # Add exception info if present
+        # Add exception info if present (driver messages quote key values: DEV-554)
         if record.exc_info:
             log_entry["exception"] = {
                 "type": record.exc_info[0].__name__ if record.exc_info[0] else None,
-                "message": str(record.exc_info[1]) if record.exc_info[1] else None,
-                "traceback": self.formatException(record.exc_info),
+                "message": (
+                    redact_log_value(str(record.exc_info[1]))
+                    if record.exc_info[1]
+                    else None
+                ),
+                "traceback": redact_log_value(self.formatException(record.exc_info)),
             }
 
-        # Add operation context if available
-        if hasattr(record, "operation"):
-            log_entry["operation"] = record.operation
-
-        if hasattr(record, "actor_subject"):
-            log_entry["actor_subject"] = record.actor_subject
-
-        if hasattr(record, "target"):
-            log_entry["target"] = record.target
-
-        if hasattr(record, "request_id"):
-            log_entry["request_id"] = record.request_id
-
-        if hasattr(record, "user_id"):
-            log_entry["user_id"] = record.user_id
+        # Add operation context if available. These fields come from the
+        # ``extra=`` of the stdlib ``logging`` call, outside ``extra_fields``, and
+        # ``actor_subject`` is the citizen's CPF on every JWT-authenticated
+        # request: they get the same masking as the message (DEV-636).
+        for field in ("operation", "actor_subject", "target", "request_id", "user_id"):
+            if hasattr(record, field):
+                log_entry[field] = redact_log_value(getattr(record, field))
 
         # Add HTTP context if available
         if hasattr(record, "http_method"):
-            log_entry["http"] = {
-                "method": record.http_method,
-                "path": getattr(record, "http_path", None),
-                "status_code": getattr(record, "http_status_code", None),
-                "duration_ms": getattr(record, "http_duration_ms", None),
-                "user_agent": getattr(record, "http_user_agent", None),
-            }
+            log_entry["http"] = redact_log_value(
+                {
+                    "method": record.http_method,
+                    "path": getattr(record, "http_path", None),
+                    "status_code": getattr(record, "http_status_code", None),
+                    "duration_ms": getattr(record, "http_duration_ms", None),
+                    "user_agent": getattr(record, "http_user_agent", None),
+                }
+            )
 
         # Add database context if available
         if hasattr(record, "db_query_type"):
@@ -95,13 +134,15 @@ class StructuredFormatter(logging.Formatter):
 
         # Add Cerbos context if available
         if hasattr(record, "cerbos_operation"):
-            log_entry["cerbos"] = {
-                "operation": record.cerbos_operation,
-                "response_status": getattr(record, "cerbos_response_status", None),
-                "duration_ms": getattr(record, "cerbos_duration_ms", None),
-                "action": getattr(record, "cerbos_action", None),
-                "resource_type": getattr(record, "cerbos_resource_type", None),
-            }
+            log_entry["cerbos"] = redact_log_value(
+                {
+                    "operation": record.cerbos_operation,
+                    "response_status": getattr(record, "cerbos_response_status", None),
+                    "duration_ms": getattr(record, "cerbos_duration_ms", None),
+                    "action": getattr(record, "cerbos_action", None),
+                    "resource_type": getattr(record, "cerbos_resource_type", None),
+                }
+            )
 
         return json.dumps(log_entry, ensure_ascii=False)
 
@@ -265,6 +306,16 @@ def setup_structured_logging() -> None:
 
     # Silence health check logs in production
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+    # uvicorn configures its loggers (own stderr handlers, propagate=False) before
+    # it imports the app, so their records skipped this formatter and its masking:
+    # the "Exception in ASGI application" traceback of a 500 carried the CPF of the
+    # exception message in clear (DEV-553). Route them to the structured handler.
+    for name in UVICORN_LOGGERS:
+        uvicorn_logger = logging.getLogger(name)
+        for handler in uvicorn_logger.handlers[:]:
+            uvicorn_logger.removeHandler(handler)
+        uvicorn_logger.propagate = True
 
 
 def get_structured_logger(name: str) -> StructuredLogger:

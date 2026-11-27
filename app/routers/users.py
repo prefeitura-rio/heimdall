@@ -5,18 +5,31 @@ Implements user endpoints as specified in SPEC.md Section 3.1.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import exists
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden
 from app.common.pagination import PaginatedResponse
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.logging_config import get_structured_logger
 from app.models import Membership, User
+from app.services.cerbos import CerbosService, admin_action
 from app.services.user import UserService
 
 router = APIRouter()
+
+logger = get_structured_logger(__name__)
+
+# Fixed 500 details: the error itself (driver message, SQL, key values) goes to
+# the masked log only, never to the response (DEV-560).
+LIST_USERS_FAILED_DETAIL = "Failed to list users"
+USER_INFO_FAILED_DETAIL = "Failed to retrieve user information"
+
+# A CPF is 11 ASCII digits, no punctuation (DEV-793).
+CPF_PATTERN = "^[0-9]{11}$"
 
 
 # Pydantic models for request/response
@@ -74,6 +87,9 @@ Default limit is 50 users per page, maximum is 100.
 
 **Authentication**: Requires a valid JWT token.
 
+**Authorization**: Requires the `heimdall:user:list` permission (checked in Cerbos before
+any user is read); superadmins have it. Callers without it get 403.
+
 **Role Aggregation**: Each user in the response includes both direct roles
 and roles inherited through group memberships.
 
@@ -124,20 +140,47 @@ and roles inherited through group memberships.
         401: {
             "description": "Unauthorized - Invalid or missing JWT token"
         },
+        403: {
+            "description": "Forbidden - caller lacks the heimdall:user:list permission",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Permission denied to list users"}
+                }
+            }
+        },
         500: {
             "description": "Internal server error"
         }
     }
 )
 async def list_users(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
     skip: int = Query(0, ge=0, description="Number of users to skip"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of users to return"),
     has_groups: bool = Query(False, description="Only return users with at least one group membership"),
 ) -> PaginatedResponse[UserResponse]:
     """List all users with pagination."""
+    # Authorize before reading any user: the list exposes every user's CPF
+    caller_roles = user_service.get_user_roles(db, current_user)
+    can_list = cerbos_service.check_permission(
+        caller_subject=current_user.subject,
+        caller_roles=caller_roles,
+        action=admin_action("user:list"),
+        resource_type="user",
+        resource_attrs={},
+    )
+    if not can_list:
+        raise forbidden(
+            db,
+            current_user,
+            operation="list_users",
+            detail="Permission denied to list users",
+            target_type="user",
+        )
+
     try:
         if has_groups:
             base_query = db.query(User).filter(
@@ -178,11 +221,14 @@ async def list_users(
             limit=limit
         )
 
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to list users", extra={"operation": "list_users"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list users: {str(e)}"
-        )
+            detail=LIST_USERS_FAILED_DETAIL,
+        ) from None
 
 
 @router.get(
@@ -242,7 +288,7 @@ roles inherited through group memberships.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to retrieve user information: Database connection error"
+                        "detail": "Failed to retrieve user information"
                     }
                 }
             }
@@ -271,11 +317,15 @@ async def get_current_user_info(
             roles=user_roles,
         )
 
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to retrieve user information",
+            extra={"operation": "get_current_user_info"},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve user information: {str(e)}"
-        )
+            detail=USER_INFO_FAILED_DETAIL,
+        ) from None
 
 
 @router.get(
@@ -288,7 +338,10 @@ Retrieve detailed information about a user by their CPF (Brazilian tax ID).
 **User Identification**: Users are identified by their CPF (Cadastro de Pessoa Física),
 which is extracted from the `preferred_username` field in Keycloak JWT tokens.
 
-**Authorization**: All authenticated users can retrieve user information.
+**Authorization**: Any authenticated user can retrieve their own record. Reading
+another user's record exposes the same data as the user list, so it requires the same
+`heimdall:user:list` permission (checked in Cerbos before the CPF is looked up, so a denied
+caller cannot tell whether it exists); superadmins have it. Callers without it get 403.
 
 **Auto-Creation**: Users are automatically created when they first authenticate with a valid JWT token.
 
@@ -327,6 +380,14 @@ roles inherited through group memberships.
                 }
             }
         },
+        403: {
+            "description": "Forbidden - caller lacks the heimdall:user:list permission",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Permission denied to view this user"}
+                }
+            }
+        },
         404: {
             "description": "User not found - CPF does not exist in the system",
             "content": {
@@ -342,12 +403,14 @@ roles inherited through group memberships.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Validation error",
-                        "errors": [
+                        "error": "Validation error",
+                        "details": [
                             {
+                                "type": "string_pattern_mismatch",
                                 "loc": ["path", "cpf"],
-                                "msg": "string does not match regex",
-                                "type": "value_error.regex"
+                                "msg": "String should match pattern '^[0-9]{11}$'",
+                                "input": "123.456.789-01",
+                                "ctx": {"pattern": "^[0-9]{11}$"}
                             }
                         ]
                     }
@@ -367,11 +430,45 @@ roles inherited through group memberships.
     }
 )
 async def get_user_by_cpf(
-    cpf: str,
-    _current_user: Annotated[User, Depends(get_current_user)],
+    # Validated here so the documented 422 happens: a malformed CPF is refused
+    # before Cerbos and the lookup, the same for every caller (DEV-793).
+    cpf: Annotated[
+        str,
+        Path(
+            description="User's CPF: 11 digits, no punctuation",
+            pattern=CPF_PATTERN,
+        ),
+    ],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
 ):
+    # A caller may always read their own record. Anyone else's record discloses
+    # the same data as the user list, so it needs the same heimdall:user:list permission.
+    # Not user:read: that is a generic application action name that app roles
+    # carry, and principal policies grant role actions on every resource kind,
+    # so it would let non-admins read any user here.
+    # Authorize before the lookup so a denied caller cannot probe which CPFs exist.
+    # The requested CPF is personal data: keep it out of Cerbos and the audit.
+    if cpf != current_user.subject:
+        caller_roles = user_service.get_user_roles(db, current_user)
+        can_read = cerbos_service.check_permission(
+            caller_subject=current_user.subject,
+            caller_roles=caller_roles,
+            action=admin_action("user:list"),
+            resource_type="user",
+            resource_attrs={},
+        )
+        if not can_read:
+            raise forbidden(
+                db,
+                current_user,
+                operation="view_user",
+                detail="Permission denied to view this user",
+                target_type="user",
+            )
+
     # Get the requested user by CPF (preferred_username is stored as subject)
     user = user_service.get_user_by_subject(db, cpf)
 

@@ -465,7 +465,14 @@ class AdminAudit(Base):
 
 
 class FailedOperation(Base):
-    """Failed operations table - tracks operations that failed and need retry."""
+    """Failed operations table - no longer read or written (DEV-777).
+
+    The retry job that read it was removed: nothing ever wrote a row, and a
+    failed Cerbos push is retried by the next reconciliation run instead. The
+    model stays only so the schema matches the migrations until the table is
+    dropped in a later migration (expand/contract: the previous release still
+    queries it).
+    """
 
     __tablename__ = "failed_operations"
 

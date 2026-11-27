@@ -1,0 +1,314 @@
+{
+  "_comment": "Mapeamentos rota→ação do app-rmi (RMI) versionados (DEV-734). 'authenticated' só exige um JWT válido no cerbos-ext-authz; 'same_as' reutiliza a ação que o banco do Heimdall dá hoje à rota indicada. Aplicado por app/mappings_sync.py (plan|apply); ver README.",
+  "application": "app-rmi",
+  "path_prefix": "/rmi/v1/",
+  "mappings": [
+    {
+      "method": "GET",
+      "path": "/rmi/v1/citizen/{cpf}/vehicles",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Lista os veículos do próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "POST",
+      "path": "/rmi/v1/citizen/{cpf}/vehicles",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Cadastra um veículo do próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/citizen/{cpf}/vehicles/{vehicle_id}",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Busca um veículo do próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rmi/v1/citizen/{cpf}/vehicles/{vehicle_id}",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Atualiza um veículo do próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "DELETE",
+      "path": "/rmi/v1/citizen/{cpf}/vehicles/{vehicle_id}",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Remove um veículo do próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/citizen/{cpf}/vehicles/{vehicle_id}/conductors",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Lista os condutores de um veículo do próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "POST",
+      "path": "/rmi/v1/citizen/{cpf}/vehicles/{vehicle_id}/conductors",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Convida um condutor para um veículo do próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "DELETE",
+      "path": "/rmi/v1/citizen/{cpf}/vehicles/{vehicle_id}/conductors/{conductor_id}",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Remove um condutor de um veículo do próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/citizen/{cpf}/vehicle-invitations",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Lista os convites de condutor recebidos pelo próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rmi/v1/citizen/{cpf}/vehicle-invitations/{conductor_id}",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Responde a um convite de condutor recebido pelo próprio cidadão",
+      "source": "DEV-734"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rmi/v1/salesforce/cidadao/{cpf}/consentimento",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Atualiza o consentimento LGPD do próprio cidadão no Salesforce",
+      "source": "DEV-796"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/salesforce/cidadao/{cpf}/exportar",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Exporta os dados do próprio cidadão no Salesforce (LGPD)",
+      "source": "DEV-796"
+    },
+    {
+      "method": "POST",
+      "path": "/rmi/v1/salesforce/cidadao/{cpf}/anonimizar",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Pede a anonimização dos dados do próprio cidadão no Salesforce (LGPD)",
+      "source": "DEV-796"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/cpf-secretaria/{cpf}",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/citizen/{cpf}/pets"
+      },
+      "description": "Lista as secretarias vinculadas ao próprio CPF",
+      "source": "DEV-796"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/mobilidade/vehicle-brands",
+      "action": "authenticated",
+      "description": "Lista o catálogo de marcas de veículos da Mobilidade (qualquer usuário autenticado)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/mobilidade/vehicle-colors",
+      "action": "authenticated",
+      "description": "Lista o catálogo de cores de veículos da Mobilidade (qualquer usuário autenticado)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/mobilidade/vehicle-models",
+      "action": "authenticated",
+      "description": "Lista o catálogo de modelos de veículos da Mobilidade (qualquer usuário autenticado)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/auth/validate",
+      "action": "authenticated",
+      "description": "Valida o JWT e sincroniza o login com o Salesforce (qualquer usuário autenticado)",
+      "source": "DEV-796"
+    },
+    {
+      "method": "POST",
+      "path": "/rmi/v1/webhooks/salesforce/cidadao",
+      "action": "authenticated",
+      "description": "Webhook do Salesforce que atualiza os dados do cidadão (JWT do Keycloak; o RMI confere o cliente do Salesforce pelo azp)",
+      "source": "OPS-375"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/salesforce/chamados",
+      "action": "authenticated",
+      "description": "Lista os chamados do usuário autenticado no Salesforce",
+      "source": "DEV-796"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/salesforce/chamados/{protocolo}",
+      "action": "authenticated",
+      "description": "Busca um chamado do usuário autenticado no Salesforce",
+      "source": "DEV-796"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/salesforce/anonimizacao/{numeroSolicitacao}",
+      "action": "authenticated",
+      "description": "Consulta uma solicitação de anonimização do usuário autenticado no Salesforce",
+      "source": "DEV-796"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/admin/mobilidade/vehicle-brands",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/admin/beta/groups"
+      },
+      "description": "Lista o catálogo de marcas de veículos da Mobilidade (admin)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "POST",
+      "path": "/rmi/v1/admin/mobilidade/vehicle-brands",
+      "same_as": {
+        "method": "POST",
+        "path": "/rmi/v1/admin/beta/groups"
+      },
+      "description": "Cria um item do catálogo de marcas de veículos da Mobilidade (admin)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rmi/v1/admin/mobilidade/vehicle-brands/{brand_id}",
+      "same_as": {
+        "method": "PUT",
+        "path": "/rmi/v1/admin/beta/groups/{group_id}"
+      },
+      "description": "Atualiza um item do catálogo de marcas de veículos da Mobilidade (admin)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "DELETE",
+      "path": "/rmi/v1/admin/mobilidade/vehicle-brands/{brand_id}",
+      "same_as": {
+        "method": "DELETE",
+        "path": "/rmi/v1/admin/beta/groups/{group_id}"
+      },
+      "description": "Remove um item do catálogo de marcas de veículos da Mobilidade (admin)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/admin/mobilidade/vehicle-models",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/admin/beta/groups"
+      },
+      "description": "Lista o catálogo de modelos de veículos da Mobilidade (admin)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "POST",
+      "path": "/rmi/v1/admin/mobilidade/vehicle-models",
+      "same_as": {
+        "method": "POST",
+        "path": "/rmi/v1/admin/beta/groups"
+      },
+      "description": "Cria um item do catálogo de modelos de veículos da Mobilidade (admin)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "PATCH",
+      "path": "/rmi/v1/admin/mobilidade/vehicle-models/{model_id}",
+      "same_as": {
+        "method": "PUT",
+        "path": "/rmi/v1/admin/beta/groups/{group_id}"
+      },
+      "description": "Atualiza um item do catálogo de modelos de veículos da Mobilidade (admin)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "DELETE",
+      "path": "/rmi/v1/admin/mobilidade/vehicle-models/{model_id}",
+      "same_as": {
+        "method": "DELETE",
+        "path": "/rmi/v1/admin/beta/groups/{group_id}"
+      },
+      "description": "Remove um item do catálogo de modelos de veículos da Mobilidade (admin)",
+      "source": "DEV-734"
+    },
+    {
+      "method": "GET",
+      "path": "/rmi/v1/admin/cpf-secretaria/{cpf}",
+      "same_as": {
+        "method": "GET",
+        "path": "/rmi/v1/admin/beta/groups"
+      },
+      "description": "Lista as secretarias vinculadas a um CPF (admin)",
+      "source": "DEV-796"
+    },
+    {
+      "method": "POST",
+      "path": "/rmi/v1/admin/cpf-secretaria/{cpf}",
+      "same_as": {
+        "method": "POST",
+        "path": "/rmi/v1/admin/beta/groups"
+      },
+      "description": "Vincula uma secretaria a um CPF (admin)",
+      "source": "DEV-796"
+    },
+    {
+      "method": "DELETE",
+      "path": "/rmi/v1/admin/cpf-secretaria/{cpf}/{cd_ua}",
+      "same_as": {
+        "method": "DELETE",
+        "path": "/rmi/v1/admin/beta/groups/{group_id}"
+      },
+      "description": "Remove o vínculo de uma secretaria com um CPF (admin)",
+      "source": "DEV-796"
+    }
+  ],
+  "remove": []
+}

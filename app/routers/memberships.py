@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.exceptions import GroupNotFoundError
 from app.models import User
 from app.services.membership import MembershipService
 from app.services.user import UserService
@@ -222,9 +223,9 @@ async def list_group_members(
 
         return member_responses
 
+    except GroupNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except PermissionError:
         raise HTTPException(
@@ -257,26 +258,20 @@ which serves as the unique subject identifier.
 
 **Role Inheritance**: Users automatically inherit all roles assigned to groups
 they're members of.
+
+**Idempotency**: Adding a user who is already a member of the group is not an
+error: the call returns 200 with `member_added` and the existing membership is
+kept unchanged.
     """,
     responses={
         200: {
-            "description": "Member added to group successfully",
+            "description": "Member added to group successfully, or already a member (idempotent)",
             "content": {
                 "application/json": {
                     "example": {
                         "status": "member_added",
                         "group": "engineering_team:backend",
                         "subject": "12345678901"
-                    }
-                }
-            }
-        },
-        400: {
-            "description": "Bad request - Invalid CPF format or user already in group",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "User is already a member of this group"
                     }
                 }
             }
@@ -353,16 +348,9 @@ async def add_member_to_group(
     # Get caller's roles for permission check
     caller_roles = user_service.get_user_roles(db, current_user)
 
-    # Ensure target user exists (auto-create if needed)
-    target_user = user_service.get_user_by_subject(db, member_data.subject)
-    if not target_user:
-        # Auto-create user if they don't exist
-        target_user = User(subject=member_data.subject)
-        db.add(target_user)
-        db.commit()
-        db.refresh(target_user)
-
-    # Add member to group with complete flow
+    # Add member to group with complete flow. The service checks the permission
+    # first and only then auto-creates the target user, so a denied call or a
+    # missing group never writes to `users`.
     try:
         success = membership_service.add_member_to_group(
             db=db,
@@ -386,9 +374,9 @@ async def add_member_to_group(
             status="member_added", group=group_name, subject=member_data.subject
         )
 
+    except GroupNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
@@ -415,20 +403,15 @@ they inherited through that group membership.
 
 **Cache Invalidation**: User role caches are automatically invalidated to ensure
 immediate effect of permission changes.
+
+**Idempotency**: Removing a user who is not (or is no longer) a member of the
+group is not an error: the call returns 204 and nothing changes. The same holds
+when the group does not exist: there is no membership to remove, so the call
+also returns 204 and nothing changes.
     """,
     responses={
         204: {
-            "description": "Member removed from group successfully"
-        },
-        400: {
-            "description": "Bad request - User not a member of the group",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "User is not a member of this group"
-                    }
-                }
-            }
+            "description": "Member removed from group successfully, or was not a member, or the group does not exist (idempotent)"
         },
         401: {
             "description": "Unauthorized - Invalid or missing JWT token",
@@ -446,16 +429,6 @@ immediate effect of permission changes.
                 "application/json": {
                     "example": {
                         "detail": "Permission denied to remove member from group 'engineering_team:backend'"
-                    }
-                }
-            }
-        },
-        404: {
-            "description": "Group or user not found",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Group 'unknown-group' not found"
                     }
                 }
             }
@@ -505,7 +478,7 @@ async def remove_member_from_group(
         from app.services.policy_invalidator import invalidate_policy_version
         invalidate_policy_version(db)
 
+    except GroupNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
-        if "not found" in str(e).lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

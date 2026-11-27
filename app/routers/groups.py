@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden, require_admin_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
@@ -196,9 +197,14 @@ async def create_group(
     )
 
     if not can_create:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="create_group",
             detail=f"Permission denied to create group '{group_data.name}'",
+            target_type="group",
+            target_id=f"group:{group_data.name}",
+            request_payload=group_data.model_dump(),
         )
 
     # Create the group
@@ -234,7 +240,9 @@ List all groups in the system with optional filtering.
 
 **Filtering**: Use the `prefix` query parameter to filter groups by name prefix.
 
-**Authorization**: All authenticated users can list groups.
+**Authorization**: Requires admin privileges to list groups. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:group:list` permission is checked in Cerbos before any read.
 
 **Performance**: Results are cached for optimal performance. Large result sets
 may be paginated in future versions.
@@ -278,6 +286,9 @@ may be paginated in future versions.
                 }
             }
         },
+        403: {
+            "description": "Forbidden - Insufficient permissions to list groups (admin only)",
+        },
         500: {
             "description": "Internal server error",
             "content": {
@@ -298,10 +309,22 @@ async def list_groups(
             example="eng"
         )
     ] = None,
-    _current_user: Annotated[User, Depends(get_current_user)] = None,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[Session, Depends(get_db)] = None,
     group_service: Annotated[GroupService, Depends(lambda: GroupService())] = None,
+    user_service: Annotated[UserService, Depends(lambda: UserService())] = None,
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())] = None,
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="group:list",
+        resource_type="group",
+        operation="list_groups",
+        detail="Permission denied to list groups",
+    )
     groups = group_service.list_groups(db=db, prefix=prefix)
 
     return [
@@ -408,9 +431,14 @@ async def delete_group(
     )
 
     if not can_delete:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="delete_group",
             detail=f"Permission denied to delete group '{group_name}'",
+            target_type="group",
+            target_id=f"group:{group_name}",
+            request_payload={"group_name": group_name},
         )
 
     # Delete the group with cascading cleanup

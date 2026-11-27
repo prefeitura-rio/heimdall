@@ -6,11 +6,13 @@ Implements role management operations with Cerbos policy synchronization.
 from opentelemetry import trace
 from sqlalchemy.orm import Session
 
+from app.exceptions import GroupNotFoundError
 from app.models import Action, Group, GroupRole, Role, RoleAction, User
 from app.services.audit import AuditService
 from app.services.base import BaseService
 from app.services.cache import CacheService
 from app.services.cerbos import CerbosService
+from app.tracing import subject_kind
 
 
 class RoleService(BaseService):
@@ -33,7 +35,8 @@ class RoleService(BaseService):
             "create_role",
             {
                 "role.name": name,
-                "role.created_by": created_by.subject,
+                "role.created_by": subject_kind(created_by.subject),
+                "role.created_by_user_id": created_by.id,
                 "role.operation": "create",
             },
         ) as span:
@@ -144,7 +147,7 @@ class RoleService(BaseService):
                 group = db.query(Group).filter(Group.name == group_name).first()
                 if not group:
                     span.set_attribute("role.group_not_found", True)
-                    raise ValueError(f"Group '{group_name}' not found")
+                    raise GroupNotFoundError(group_name)
 
                 span.set_attribute("role.group_id", group.id)
 
@@ -180,7 +183,8 @@ class RoleService(BaseService):
             {
                 "role.group_name": group_name,
                 "role.role_name": role_name,
-                "role.assigned_by": assigned_by.subject,
+                "role.assigned_by": subject_kind(assigned_by.subject),
+                "role.assigned_by_user_id": assigned_by.id,
                 "role.operation": "assign_to_group",
             },
         ) as span:
@@ -282,7 +286,8 @@ class RoleService(BaseService):
             {
                 "role.group_name": group_name,
                 "role.role_name": role_name,
-                "role.removed_by": removed_by.subject,
+                "role.removed_by": subject_kind(removed_by.subject),
+                "role.removed_by_user_id": removed_by.id,
                 "role.operation": "remove_from_group",
             },
         ) as span:
@@ -477,10 +482,11 @@ class RoleService(BaseService):
                 span.set_attribute("operation.error", str(e))
                 raise
 
-    def delete_role(self, db: Session, role_name: str) -> bool:
+    def delete_role(self, db: Session, role_name: str, deleted_by: User) -> bool:
         """
         Delete a role from the system.
         Also removes the role from all groups and user assignments.
+        The deletion is audited with deleted_by as the actor.
         """
         with self.trace_operation("delete_role", {"role_name": role_name}) as span:
             try:
@@ -509,12 +515,13 @@ class RoleService(BaseService):
                     db=db,
                     operation="delete",
                     role_name=role_name,
-                    actor_subject="system",  # Will be updated with actual user in future
+                    actor_subject=deleted_by.subject,
                     result={
                         "role_id": role.id,
                         "group_roles_removed": group_roles_count
                     },
-                    success=True
+                    success=True,
+                    actor_user_id=deleted_by.id,
                 )
 
                 return True
@@ -570,7 +577,8 @@ class RoleService(BaseService):
             {
                 "role_name": role_name,
                 "action_name": action_name,
-                "assigned_by": assigned_by.subject,
+                "assigned_by": subject_kind(assigned_by.subject),
+                "assigned_by_user_id": assigned_by.id,
             },
         ) as span:
             try:
@@ -666,7 +674,8 @@ class RoleService(BaseService):
             {
                 "role_name": role_name,
                 "action_name": action_name,
-                "removed_by": removed_by.subject,
+                "removed_by": subject_kind(removed_by.subject),
+                "removed_by_user_id": removed_by.id,
             },
         ) as span:
             try:

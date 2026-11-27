@@ -23,7 +23,7 @@ Provide a secured REST API consumed by your Admin UI and trusted automation for:
 - Manage group ↔ role relations (what roles a group grants)
 - Manage memberships (add/remove users to/from groups)
 - Manage endpoint → action mappings (for adapter mapping service)
-- Manage group-management rights (which manager-groups can manage which target-groups)
+- ~~Manage group-management rights (which manager-groups can manage which target-groups)~~ — **not supported**: pattern-based delegation of group management is not implemented (see `group_management_rights` in Section 2)
 - Audit all admin operations (who, what, when, request metadata)
 - Push principal policies to Cerbos Admin API (optional; see modes)
 - Provide a mapping lookup endpoint (adapter uses it, with caching on adapter)
@@ -50,7 +50,7 @@ CREATE TABLE actions (
 -- endpoints (mapping: many endpoint patterns -> one action)
 CREATE TABLE endpoints (
   id SERIAL PRIMARY KEY,
-  path_pattern TEXT NOT NULL,   -- e.g. '/courses', '/courses/*', '/courses/:id/enroll'
+  path_pattern TEXT NOT NULL,   -- e.g. '/courses', '/courses/*', '/courses/([^/]+)/enroll$'
   method TEXT NOT NULL,         -- 'GET','POST',... or 'ANY'
   action_id INT NOT NULL REFERENCES actions(id) ON DELETE RESTRICT,
   description TEXT,
@@ -109,7 +109,11 @@ CREATE TABLE user_roles (
   PRIMARY KEY (user_id, role_id)
 );
 
--- group_management_rights
+-- group_management_rights (RESERVED, UNUSED)
+-- Pattern-based delegation of group management is NOT a supported feature.
+-- The table exists in the schema/migrations only; no endpoint reads or writes it
+-- and no authorization check consults it. Delegating group administration today
+-- requires a role granted through Cerbos (e.g. group_manager or admin).
 CREATE TABLE group_management_rights (
   id SERIAL PRIMARY KEY,
   manager_group_id INT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -199,7 +203,7 @@ Create a group.
 ```
 
 **Before DB write:**
-- Admin service calls Cerbos Check to verify caller has permission group:create (or group:manage) on that target group. (We require that only people with superadmin or go:admin or group-management rights create go:* groups.)
+- Admin service calls Cerbos Check to verify caller has permission group:create (or group:manage) on that target group. (We require that only people with superadmin or go:admin create go:* groups; pattern-based group-management rights are not supported.)
 
 **Cerbos check example payload:**
 ```json
@@ -236,7 +240,7 @@ Add member to group (delegation operation).
 **Flow:**
 1. Ensure caller user row exists (create if necessary).
 2. Build Cerbos check request asking if caller can group:add_member on group:{groupName}.
-3. If config uses group-management-rights DB table, you may enforce local checks too, but always call Cerbos to make the final decision.
+3. Cerbos is the only authorization source for this decision. Local checks based on the `group_management_rights` table are not supported (the table is reserved and unused).
 4. If allowed, create memberships row inside a DB transaction (upsert).
 5. If Admin Service is operating in push-to-Cerbos mode: create or update principal policy for bob in Cerbos Admin API to include the group's roles (or add role to existing principal policy). Wait for Admin API 200; on failure, roll back DB change or retry with backoff. Record in admin_audit.
 
@@ -301,8 +305,8 @@ Delete mapping (check permissions)
 Reconciliation and sync operations run as background tasks:
 
 - **Reconciliation task**: Periodically walks memberships, retrieves group→role mapping, and ensures Cerbos principal policies reflect DB state
-- **Sync task**: Handles any failed Cerbos Admin API calls with retry logic
-- Both tasks run automatically in the background (no manual endpoints)
+- **Retry of failed Cerbos Admin API calls**: there is no separate retry task. A reconciliation run with any failed user does not mark the policy version as synced, so the next run walks the users again and re-pushes each user whose last push did not succeed (per-user hash in Redis)
+- The task runs automatically in the background (no manual endpoints)
 
 ### 3.7 Health and meta endpoints
 
@@ -323,6 +327,8 @@ Always before making an administrative mutation that affects permissions or grou
 - reconcile (optional: require superadmin)
 
 For any operation where the caller must be explicitly authorized, do a Cerbos Check.
+
+**Reserved admin namespace (DEV-556):** every admin route checks its action in Cerbos with the `heimdall:` prefix (`heimdall:group:add_member`, `heimdall:user:list`, `heimdall:mapping:list`…), the list in `ADMIN_ACTIONS` (`app/services/cerbos.py`), including the listings the gateway already restricts. Application roles use free-form action names, so a non-superadmin principal policy denies on the admin resources (`group`, `user`, `role`, `action`, `mapping`, `membership`) every action of the user outside that namespace; application actions keep working on any other resource kind, and `heimdall:` actions are allowed on every kind, so the gateway (kind `generic`) can map Heimdall's own routes to them. Delegated administration means granting a role the `heimdall:` action. On startup, each missing `heimdall:` action is created once and granted to the roles that held the legacy un-prefixed name (expand phase); moving the gateway mappings of Heimdall's routes and removing the legacy names is a later contract step.
 
 **Example Cerbos Check payload (group:add_member):**
 ```json
@@ -367,7 +373,7 @@ The service automatically pushes principal policies to Cerbos Admin API. This is
 1. Insert membership row into DB (within DB transaction)
 2. Automatically build and push principal policy for the user that aggregates all roles
 3. On success: commit DB transaction and return success to caller
-4. On failure: use background retry job to ensure eventual consistency
+4. On failure: the next background reconciliation run re-pushes the policy (eventual consistency)
 
 **Policy management is completely transparent** - users never see or manipulate Cerbos policy formats.
 
@@ -490,7 +496,6 @@ OTEL_RESOURCE_ATTRIBUTES=service.name=heimdall-admin-service,service.version=1.0
 
 # Background Tasks (for background container only)
 RECONCILE_INTERVAL_SECONDS=300  # 5 minutes
-SYNC_RETRY_INTERVAL_SECONDS=60  # 1 minute
 
 # Server (for API container only)
 HOST=0.0.0.0

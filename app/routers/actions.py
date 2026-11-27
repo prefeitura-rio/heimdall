@@ -9,14 +9,30 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden, require_admin_permission
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.logging_config import get_structured_logger
 from app.models import User
 from app.services.action import ActionService
 from app.services.cerbos import CerbosService
 from app.services.user import UserService
 
 router = APIRouter()
+
+logger = get_structured_logger(__name__)
+
+# Fixed 500 details: the error itself (driver message, SQL, constraint, key
+# values) goes to the masked log only, never to the response (DEV-626).
+CREATE_ACTION_FAILED_DETAIL = "Failed to create action"
+LIST_ACTIONS_FAILED_DETAIL = "Failed to list actions"
+GET_ACTION_FAILED_DETAIL = "Failed to get action"
+UPDATE_ACTION_FAILED_DETAIL = "Failed to update action"
+DELETE_ACTION_FAILED_DETAIL = "Failed to delete action"
+
+# Action name convention, enforced on create and on update alike (DEV-664).
+ACTION_NAME_PATTERN = "^[a-z0-9_:]+$"
+ACTION_NAME_RULE = "lowercase letters, numbers, underscores, and colons only"
 
 
 # Pydantic models for request/response
@@ -25,11 +41,11 @@ class ActionCreateRequest(BaseModel):
 
     name: str = Field(
         ...,
-        description="Unique name for the action (lowercase letters, numbers, underscores, and colons only)",
+        description=f"Unique name for the action ({ACTION_NAME_RULE})",
         example="user:read",
         min_length=1,
         max_length=100,
-        pattern="^[a-z0-9_:]+$"
+        pattern=ACTION_NAME_PATTERN
     )
     description: str = Field(
         ...,
@@ -53,11 +69,11 @@ class ActionUpdateRequest(BaseModel):
 
     name: str | None = Field(
         None,
-        description="Updated name for the action",
+        description=f"Updated name for the action ({ACTION_NAME_RULE})",
         example="user:read",
         min_length=1,
         max_length=100,
-        pattern="^[a-zA-Z0-9_:-]+$"
+        pattern=ACTION_NAME_PATTERN
     )
     description: str | None = Field(
         None,
@@ -263,7 +279,7 @@ Create a new action that can be used in authorization policies and endpoint mapp
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to create action: Database connection error"
+                        "detail": "Failed to create action"
                     }
                 }
             }
@@ -290,9 +306,14 @@ async def create_action(
         )
 
         if not can_create:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="action_create",
                 detail="Insufficient permissions to create actions",
+                target_type="action",
+                target_id=action_data.name,
+                request_payload=action_data.model_dump(),
             )
 
         # Create the action
@@ -314,13 +335,18 @@ async def create_action(
             endpoint_count=len(action.endpoints),
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to create action", extra={"operation": "create_action"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create action: {str(e)}",
-        )
+            detail=CREATE_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.get(
@@ -330,7 +356,9 @@ async def create_action(
     description="""
 Retrieve a paginated list of all actions available in the system.
 
-**Authorization**: All authenticated users can list actions.
+**Authorization**: Requires admin privileges to list actions. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:action:list` permission is checked in Cerbos before any read.
 
 **Pagination**: Use `skip` and `limit` parameters to control pagination.
 Maximum limit is 100 actions per request.
@@ -399,12 +427,15 @@ number of API endpoints currently mapped to it.
                 }
             }
         },
+        403: {
+            "description": "Forbidden - Insufficient permissions to list actions (admin only)",
+        },
         500: {
             "description": "Internal server error",
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to list actions: Database connection error"
+                        "detail": "Failed to list actions"
                     }
                 }
             }
@@ -412,12 +443,24 @@ number of API endpoints currently mapped to it.
     }
 )
 async def list_actions(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     action_service: Annotated[ActionService, Depends(get_action_service)],
+    user_service: Annotated[UserService, Depends(get_user_service)],
+    cerbos_service: Annotated[CerbosService, Depends(get_cerbos_service)],
     skip: Annotated[int, Query(ge=0, description="Number of actions to skip (pagination offset)", example=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of actions to return", example=50)] = 50,
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="action:list",
+        resource_type="action",
+        operation="list_actions",
+        detail="Permission denied to list actions",
+    )
     try:
         actions = action_service.list_actions(db=db, skip=skip, limit=limit)
 
@@ -442,11 +485,14 @@ async def list_actions(
             limit=limit,
         )
 
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to list actions", extra={"operation": "list_actions"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list actions: {str(e)}",
-        )
+            detail=LIST_ACTIONS_FAILED_DETAIL,
+        ) from None
 
 
 @router.get(
@@ -456,7 +502,9 @@ async def list_actions(
     description="""
 Retrieve detailed information about a specific action by its ID.
 
-**Authorization**: All authenticated users can read action information.
+**Authorization**: Requires admin privileges to read actions. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:action:read` permission is checked in Cerbos before any read.
 
 **Action Details**: Returns the action's name, description, and number of
 API endpoints currently mapped to this action.
@@ -491,6 +539,9 @@ API endpoints currently mapped to this action.
                 }
             }
         },
+        403: {
+            "description": "Forbidden - Insufficient permissions to read actions (admin only)",
+        },
         404: {
             "description": "Action not found",
             "content": {
@@ -506,7 +557,7 @@ API endpoints currently mapped to this action.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to get action: Database connection error"
+                        "detail": "Failed to get action"
                     }
                 }
             }
@@ -515,10 +566,25 @@ API endpoints currently mapped to this action.
 )
 async def get_action(
     action_id: int,
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     action_service: Annotated[ActionService, Depends(get_action_service)],
+    user_service: Annotated[UserService, Depends(get_user_service)],
+    cerbos_service: Annotated[CerbosService, Depends(get_cerbos_service)],
 ):
+    # Authorize before the lookup: a denied caller cannot probe which ids exist
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="action:read",
+        resource_type="action",
+        operation="get_action",
+        detail="Permission denied to view actions",
+        resource_attrs={"id": str(action_id)},
+        target_id=str(action_id),
+    )
     try:
         action = action_service.get_action(db=db, action_id=action_id)
 
@@ -537,11 +603,14 @@ async def get_action(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to get action", extra={"operation": "get_action"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get action: {str(e)}",
-        )
+            detail=GET_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.put(
@@ -623,7 +692,7 @@ authorization policies that reference this action.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to update action: Database connection error"
+                        "detail": "Failed to update action"
                     }
                 }
             }
@@ -651,9 +720,17 @@ async def update_action(
         )
 
         if not can_update:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="action_update",
                 detail="Insufficient permissions to update actions",
+                target_type="action",
+                target_id=str(action_id),
+                request_payload={
+                    "action_id": action_id,
+                    **action_data.model_dump(exclude_unset=True),
+                },
             )
 
         # Update the action
@@ -672,13 +749,18 @@ async def update_action(
             endpoint_count=len(action.endpoints),
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to update action", extra={"operation": "update_action"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update action: {str(e)}",
-        )
+            detail=UPDATE_ACTION_FAILED_DETAIL,
+        ) from None
 
 
 @router.delete(
@@ -753,7 +835,7 @@ needed before deletion.
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Failed to delete action: Database connection error"
+                        "detail": "Failed to delete action"
                     }
                 }
             }
@@ -780,9 +862,14 @@ async def delete_action(
         )
 
         if not can_delete:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise forbidden(
+                db,
+                current_user,
+                operation="action_delete",
                 detail="Insufficient permissions to delete actions",
+                target_type="action",
+                target_id=str(action_id),
+                request_payload={"action_id": action_id},
             )
 
         # Delete the action
@@ -796,10 +883,15 @@ async def delete_action(
 
         return  # 204 No Content
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.logger.exception(
+            "Failed to delete action", extra={"operation": "delete_action"}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete action: {str(e)}",
-        )
+            detail=DELETE_ACTION_FAILED_DETAIL,
+        ) from None

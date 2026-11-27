@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.common.authz import forbidden, require_admin_permission
 from app.database import get_db
 from app.dependencies import get_api_user, get_current_user
+from app.exceptions import MappingAlreadyExistsError
 from app.models import User
 from app.services.cerbos import CerbosService
 from app.services.mapping import MappingService
@@ -325,11 +327,11 @@ actions API to create actions first.
             }
         },
         400: {
-            "description": "Bad request - Invalid action ID",
+            "description": "Bad request - Action ID does not exist or invalid path pattern",
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Action with ID 999 does not exist"
+                        "detail": "Action with ID 999 not found"
                     }
                 }
             }
@@ -412,9 +414,14 @@ async def create_mapping(
     )
 
     if not can_create:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="create_mapping",
             detail="Permission denied to create mappings",
+            target_type="mapping",
+            target_id=f"mapping:{mapping_data.method}:{mapping_data.path_pattern}",
+            request_payload=mapping_data.model_dump(),
         )
 
     # Create the mapping
@@ -427,8 +434,12 @@ async def create_mapping(
             description=mapping_data.description,
             created_by=current_user,
         )
-    except ValueError as e:
+    except MappingAlreadyExistsError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValueError as e:
+        # Invalid input: a missing action (ActionNotFoundError) or a path
+        # pattern that cannot be used. Only the duplicate is a conflict.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return MappingDetailResponse(
         id=mapping.id,
@@ -572,9 +583,17 @@ async def update_mapping(
     )
 
     if not can_update:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="update_mapping",
             detail=f"Permission denied to update mapping {mapping_id}",
+            target_type="mapping",
+            target_id=f"mapping:{mapping_id}",
+            request_payload={
+                "mapping_id": mapping_id,
+                **mapping_data.model_dump(exclude_unset=True),
+            },
         )
 
     # Update the mapping
@@ -682,9 +701,14 @@ async def delete_mapping(
     )
 
     if not can_delete:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        raise forbidden(
+            db,
+            current_user,
+            operation="delete_mapping",
             detail=f"Permission denied to delete mapping {mapping_id}",
+            target_type="mapping",
+            target_id=f"mapping:{mapping_id}",
+            request_payload={"mapping_id": mapping_id},
         )
 
     # Delete the mapping
@@ -711,7 +735,9 @@ async def delete_mapping(
     description="""
 Retrieve a list of all endpoint-to-action mappings with optional filtering.
 
-**Authorization**: All authenticated users can list mappings.
+**Authorization**: Requires admin privileges to list mappings. The authorization
+gateway (Istio ext_authz + Cerbos) denies any other authenticated user with 403,
+and the `heimdall:mapping:list` permission is checked in Cerbos before any read.
 
 **Filtering**: Use the action_filter parameter to show only mappings for
 a specific action (exact match on action name).
@@ -766,6 +792,9 @@ interfaces and configuration management tools.
                 }
             }
         },
+        403: {
+            "description": "Forbidden - Insufficient permissions to list mappings (admin only)",
+        },
         500: {
             "description": "Internal server error",
             "content": {
@@ -779,13 +808,25 @@ interfaces and configuration management tools.
     }
 )
 async def list_mappings(
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     mapping_service: Annotated[MappingService, Depends(lambda: MappingService())],
+    user_service: Annotated[UserService, Depends(lambda: UserService())],
+    cerbos_service: Annotated[CerbosService, Depends(lambda: CerbosService())],
     action_filter: Annotated[
         str | None, Query(description="Filter mappings by specific action name (exact match)", example="user:read")
     ] = None,
 ):
+    require_admin_permission(
+        db,
+        current_user,
+        user_service,
+        cerbos_service,
+        action="mapping:list",
+        resource_type="mapping",
+        operation="list_mappings",
+        detail="Permission denied to list mappings",
+    )
     mappings = mapping_service.list_mappings(db=db, action_filter=action_filter)
 
     return [
