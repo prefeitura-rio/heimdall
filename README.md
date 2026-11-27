@@ -258,8 +258,7 @@ curl -H "Authorization: Bearer <static-token>" http://localhost:8000/api/v1/mapp
 ### Health Monitoring
 - **Dependency Checks**: Real-time health checks for PostgreSQL, Redis, Cerbos
 - **Performance Metrics**: System resource utilization monitoring
-- **Database Performance**: Query performance tracking and optimization suggestions
-- **Cache Statistics**: Redis performance and hit rate monitoring
+- **Database Performance**: Query performance tracking and slow query logging
 
 ## 🔄 Background Tasks
 
@@ -464,11 +463,9 @@ redis-cli -u $REDIS_URL monitor
 
 **Database Performance**
 - Monitor slow queries via `/api/v1/database` endpoint
-- Review optimization suggestions provided by the monitoring service
 - Use database indexes added for common query patterns
 
 **Cache Performance**  
-- Monitor cache hit rates via `/api/v1/metrics` endpoint
 - Adjust TTL values via environment variables if needed
 - Monitor Redis memory usage
 

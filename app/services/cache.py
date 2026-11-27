@@ -362,38 +362,3 @@ class CacheService(BaseService):
                 span.set_attribute("cache.error", str(e))
                 span.set_attribute("cache.healthy", False)
                 return False
-
-    def get_cache_stats(self) -> dict[str, Any]:
-        """
-        Get cache statistics for monitoring.
-        """
-        with self.trace_operation(
-            "get_cache_stats", {"cache.operation": "stats"}
-        ) as span:
-            try:
-                redis_conn = self._get_redis_connection()
-                info = redis_conn.info()
-
-                stats = {
-                    "connected_clients": info.get("connected_clients", 0),
-                    "used_memory": info.get("used_memory", 0),
-                    "used_memory_human": info.get("used_memory_human", "0B"),
-                    "keyspace_hits": info.get("keyspace_hits", 0),
-                    "keyspace_misses": info.get("keyspace_misses", 0),
-                    "total_commands_processed": info.get("total_commands_processed", 0),
-                }
-
-                # Calculate hit rate
-                hits = stats["keyspace_hits"]
-                misses = stats["keyspace_misses"]
-                total = hits + misses
-                stats["hit_rate"] = hits / total if total > 0 else 0.0
-
-                span.set_attribute("cache.stats_retrieved", True)
-                return stats
-
-            except redis.RedisError as e:
-                span.record_exception(e)
-                span.set_attribute("cache.error", str(e))
-                span.set_attribute("cache.stats_retrieved", False)
-                return {"error": str(e)}
