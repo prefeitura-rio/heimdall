@@ -197,8 +197,8 @@ curl -H "Authorization: Bearer <static-token>" http://localhost:8000/api/v1/mapp
 #### Roles
 - `POST /api/v1/roles` - Create a new role
 - `GET /api/v1/roles` - List all roles
-- `POST /api/v1/groups/{groupName}/roles` - Assign role to group
-- `DELETE /api/v1/groups/{groupName}/roles/{roleName}` - Remove role from group
+- `POST /api/v1/roles/groups/{groupName}/roles` - Assign role to group
+- `DELETE /api/v1/roles/groups/{groupName}/roles/{roleName}` - Remove role from group
 
 #### Mappings
 - `GET /api/v1/mappings` - Resolve path/method to action
@@ -210,10 +210,6 @@ curl -H "Authorization: Bearer <static-token>" http://localhost:8000/api/v1/mapp
 #### Health & Monitoring
 - `GET /api/v1/healthz` - Basic health check
 - `GET /api/v1/readyz` - Readiness check with dependency validation
-- `GET /api/v1/version` - Service version information
-- `GET /api/v1/metrics` - System and cache metrics
-- `GET /api/v1/config` - Configuration summary (safe)
-- `GET /api/v1/database` - Database performance metrics
 
 ### Interactive Documentation
 
@@ -462,7 +458,7 @@ redis-cli -u $REDIS_URL monitor
 ### Performance Optimization
 
 **Database Performance**
-- Monitor slow queries via `/api/v1/database` endpoint
+- Monitor slow queries in the structured logs (`operation: slow_query`, queries over 1s)
 - Use database indexes added for common query patterns
 
 **Cache Performance**  
